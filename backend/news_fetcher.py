@@ -79,6 +79,31 @@ class NewsFetcher:
                 "https://www.mirror.co.uk/news/rss.xml",
                 "https://www.telegraph.co.uk/news/rss.xml",
                 "https://www.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+            ],
+            # 中文技术/编程/开发者社区（强烈推荐）- 每个RSS源作为独立主题
+            "阮一峰的网络日志": [
+                "https://www.ruanyifeng.com/blog/atom.xml",
+            ],
+            "酷壳 CoolShell": [
+                "https://coolshell.cn/feed",
+            ],
+            "美团技术团队": [
+                "https://tech.meituan.com/feed",
+            ],
+            "少数派（数字生产力）": [
+                "https://sspai.com/feed",
+            ],
+            "玉伯的博客/蚂蚁体验": [
+                "https://www.yuque.com/yubo/blog/rss",
+            ],
+            "粥里有勺糖": [
+                "https://www.zhihu.com/people/shao-nian-ge-xing-68-13/posts/rss",
+            ],
+            "黑泽的博客": [
+                "https://heizex.com/feed",
+            ],
+            "独立开发者周刊": [
+                "https://indiehackers.feeds.cn/rss",
             ]
         }
         

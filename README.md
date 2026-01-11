@@ -17,9 +17,13 @@ Daily Digest Agent 是一个智能新闻摘要应用，通过AI技术自动抓�
 
 ### 核心功能
 
-- 🎯 **个性化订阅**：自由订阅感兴趣的新闻主题（科技、AI、财经、娱乐等）
+- 🎯 **个性化订阅**：自由订阅感兴趣的新闻主题（科技、AI、财经、娱乐等），支持预设主题快速订阅
+- 🔗 **自定义RSS源**：添加任意RSS源，支持中文技术博客（阮一峰、酷壳、美团技术团队等）
 - 🤖 **AI智能摘要**：支持阿里云DashScope、NVIDIA GLM API或本地Ollama生成简洁摘要
 - 🤪 **吐槽模式**：幽默俏皮的段子风格摘要，让阅读新闻更有趣
+- 📊 **智能排序**：按时间或相关性排序，LLM评估新闻相关性分数
+- 👁️ **阅读状态**：标记已读/未读，支持隐藏已读新闻
+- 🎛️ **个性化设置**：隐藏特定新闻来源，自定义显示偏好
 - 📧 **邮件推送**：可配置的定时邮件推送，支持每日、每周或自定义间隔
 - 🎨 **精美界面**：基于 shadcn/ui 的现代化 UI，支持深色模式
 - 📱 **移动端优化**：完美适配桌面和移动设备，响应式设计
@@ -63,35 +67,46 @@ Daily Digest Agent 是一个智能新闻摘要应用，通过AI技术自动抓�
 backend/
 ├── main.py              # FastAPI应用入口，生命周期管理
 ├── database.py          # 数据库配置、连接池、模型基类
-├── models.py            # 数据模型（User、Subscription、NewsCache）
+├── models.py            # 数据模型（User、Subscription、NewsCache、CustomRSSFeed等）
 ├── auth.py              # 用户认证逻辑（密码哈希、JWT生成）
 ├── news_fetcher.py      # 新闻抓取模块（GNews/NewsData/RSS）
 ├── summarizer.py        # LLM摘要生成模块（多提供商支持）
-├── scheduler.py         # 定时任务调度器（邮件推送）
+├── scheduler.py         # 定时任务调度器（邮件推送、防重复刷新）
 └── routes/              # API路由模块
     ├── auth.py          # 认证相关API（注册/登录/重置密码）
-    ├── subscriptions.py # 订阅管理API（增删改查）
-    ├── news.py          # 新闻相关API（获取/刷新摘要）
+    ├── subscriptions.py # 订阅管理API（增删改查、自定义RSS源）
+    ├── news.py          # 新闻相关API（获取/刷新摘要、阅读状态）
     ├── schedule.py      # 邮件调度API（配置定时推送）
-    └── preferences.py   # 用户偏好设置API
+    └── preferences.py   # 用户偏好设置API（排序、过滤、阅读状态）
 ```
+
+**数据模型：**
+- **User** - 用户信息、邮件定时配置
+- **Subscription** - 主题订阅（支持吐槽模式）
+- **CustomRSSFeed** - 自定义RSS源订阅
+- **NewsCache** - 新闻缓存（摘要、吐槽摘要、相关性分数）
+- **UserPreference** - 用户偏好（隐藏已读、排序方式、隐藏来源）
+- **UserNewsInteraction** - 用户阅读状态记录
+- **TopicRefreshStatus** - 主题刷新状态（防重复刷新）
 
 **数据流程：**
 
 ```
-1. 用户订阅主题
+1. 用户订阅主题或添加自定义RSS源
    ↓
 2. NewsFetcher 定时抓取新闻（GNews/NewsData/RSS）
    ↓
-3. 新闻缓存到 NewsCache 表
+3. 新闻缓存到 NewsCache 表（去重、entry_id唯一标识）
    ↓
-4. Summarizer 调用 LLM 生成摘要
+4. Summarizer 调用 LLM 生成摘要（普通+吐槽模式）
    ↓
-5. 摘要存储到 NewsCache.summary
+5. LLM 评估新闻相关性分数（relevance_score）
    ↓
-6. Dashboard API 返回给前端展示
+6. Dashboard API 根据用户偏好过滤和排序
    ↓
-7. Scheduler 定时发送邮件摘要（可选）
+7. 用户标记阅读状态，系统记录交互
+   ↓
+8. Scheduler 定时发送邮件摘要（可选）
 ```
 
 **LLM支持：**
@@ -249,6 +264,32 @@ CORS_ORIGINS=http://localhost:5173,http://your-domain.com
 
 详细配置说明请查看 `env.example` 文件。
 
+## ✨ 主要功能详解
+
+### 订阅管理
+
+- **预设主题**：快速订阅热门主题（科技、AI、财经、娱乐等）
+- **自定义主题**：输入任意主题名称，系统自动匹配新闻
+- **自定义RSS源**：添加任意RSS源，支持中文技术博客
+- **吐槽模式**：为每个主题单独开启/关闭幽默摘要模式
+
+### 个性化设置
+
+- **阅读状态**：标记新闻为已读/未读，支持隐藏已读新闻
+- **排序方式**：
+  - 按时间排序：显示最新新闻
+  - 按相关性排序：LLM评估相关性，优先显示重要新闻
+- **来源过滤**：隐藏不感兴趣的新闻来源
+- **刷新控制**：智能防重复刷新，避免资源浪费
+
+### 新闻源支持
+
+- **GNews API**：免费100次/月
+- **NewsData.io**：免费200次/天
+- **RSS源**：自动降级，支持任意RSS源
+- **预设RSS**：内置多个高质量RSS源（The Verge、TechCrunch、BBC等）
+- **中文技术博客**：阮一峰、酷壳、美团技术团队、少数派等
+
 ## 📚 文档
 
 - [QUICKSTART.md](QUICKSTART.md) - 快速开始指南
@@ -265,8 +306,11 @@ CORS_ORIGINS=http://localhost:5173,http://your-domain.com
 
 ## 📝 开发计划
 
+- [x] 阅读进度标记（已读/未读）
+- [x] 自定义RSS源支持
+- [x] 用户偏好设置
+- [x] 相关性排序
 - [ ] Telegram Bot推送
-- [ ] 阅读进度标记（已读/未读）
 - [ ] 多语言支持
 - [ ] 新闻收藏功能
 - [ ] 导出摘要为PDF/Markdown
