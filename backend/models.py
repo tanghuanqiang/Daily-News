@@ -41,6 +41,22 @@ class Subscription(Base):
     user = relationship("User", back_populates="subscriptions")
 
 
+class CustomRSSFeed(Base):
+    """自定义RSS源表"""
+    __tablename__ = "custom_rss_feeds"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    topic = Column(String, nullable=False)  # 主题名称
+    feed_url = Column(String, nullable=False)  # RSS源URL
+    is_active = Column(Boolean, default=True)  # 是否启用（是否订阅）
+    roast_mode = Column(Boolean, default=False)  # 是否使用吐槽模式
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User")
+
+
 class NewsCache(Base):
     __tablename__ = "news_cache"
     
@@ -56,6 +72,9 @@ class NewsCache(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow)
     date = Column(String, index=True)  # YYYY-MM-DD for daily grouping
     relevance_score = Column(Float, nullable=True, default=0.5)  # 相关性分数 (0-1)，由LLM评估
+    
+    # Unique identifier for RSS entries (feed_url + guid/link hash)
+    entry_id = Column(String, index=True, unique=True, nullable=True)  # 用于RSS源的唯一标识
     
     # Metadata
     raw_content = Column(Text, nullable=True)  # Original news content snippet
@@ -218,3 +237,25 @@ class UserPreferenceUpdate(BaseModel):
     hide_read: Optional[bool] = None
     sort_by: Optional[str] = None
     hidden_sources: Optional[List[str]] = None
+
+
+class CustomRSSFeedCreate(BaseModel):
+    topic: str
+    feed_url: str
+
+
+class CustomRSSFeedUpdate(BaseModel):
+    is_active: Optional[bool] = None
+    roast_mode: Optional[bool] = None
+
+
+class CustomRSSFeedResponse(BaseModel):
+    id: int
+    topic: str
+    feed_url: str
+    is_active: bool
+    roast_mode: bool
+    created_at: dt
+    
+    class Config:
+        from_attributes = True

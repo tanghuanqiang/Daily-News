@@ -12,7 +12,8 @@ from models import (
     User,
     TopicRefreshStatus,
     UserPreference,
-    UserNewsInteraction
+    UserNewsInteraction,
+    CustomRSSFeed
 )
 from auth import get_current_active_user
 from scheduler import refresh_topic_with_lock, can_refresh_topic, get_or_create_refresh_status
@@ -45,7 +46,26 @@ async def get_dashboard(
         Subscription.is_active == True
     ).all()
     
-    if not subscriptions:
+    # Get user's active custom RSS feeds
+    custom_feeds = db.query(CustomRSSFeed).filter(
+        CustomRSSFeed.user_id == current_user.id,
+        CustomRSSFeed.is_active == True
+    ).all()
+    
+    # Create a combined list of topics with their roast_mode
+    # For subscriptions, use subscription's roast_mode
+    # For custom RSS feeds, use feed's roast_mode
+    topic_configs = {}
+    for sub in subscriptions:
+        topic_configs[sub.topic] = {"roast_mode": sub.roast_mode, "type": "subscription"}
+    
+    for feed in custom_feeds:
+        # If topic already exists from subscription, keep subscription's roast_mode
+        # Otherwise, use feed's roast_mode
+        if feed.topic not in topic_configs:
+            topic_configs[feed.topic] = {"roast_mode": feed.roast_mode, "type": "custom_rss"}
+    
+    if not topic_configs:
         return {
             "topics": [],
             "last_global_update": None
@@ -75,10 +95,11 @@ async def get_dashboard(
     # Get hidden sources
     hidden_sources = set(preference.hidden_sources or [])
     
-    for sub in subscriptions:
+    # Process all topics (from both subscriptions and custom RSS feeds)
+    for topic, config in topic_configs.items():
         # Get news for this topic from cache
         query = db.query(NewsCache).filter(
-            NewsCache.topic == sub.topic,
+            NewsCache.topic == topic,
             NewsCache.date == date_filter
         )
         
@@ -90,11 +111,11 @@ async def get_dashboard(
         if preference.hide_read and read_news_ids:
             query = query.filter(~NewsCache.id.in_(read_news_ids))
         
-        # Apply sorting
+        # Apply sorting - always show latest 16 items by creation time (fetched_at)
         if preference.sort_by == "time":
-            news_items = query.order_by(NewsCache.fetched_at.desc()).limit(8).all()
-        else:  # relevance: 按相关性分数排序
-            news_items = query.order_by(NewsCache.relevance_score.desc(), NewsCache.fetched_at.desc()).limit(8).all()
+            news_items = query.order_by(NewsCache.fetched_at.desc()).limit(16).all()
+        else:  # relevance: 按相关性分数排序，但仍然限制16条
+            news_items = query.order_by(NewsCache.relevance_score.desc(), NewsCache.fetched_at.desc()).limit(16).all()
         
         if news_items:
             # Get the latest update time
@@ -136,10 +157,10 @@ async def get_dashboard(
             
             # Build news summary for topic
             topics_data.append({
-                "topic": sub.topic,
+                "topic": topic,
                 "news_items": news_items_with_status,
                 "last_updated": latest_update,
-                "roast_mode": sub.roast_mode
+                "roast_mode": config["roast_mode"]
             })
     
     return {
@@ -191,16 +212,24 @@ async def trigger_manual_refresh(
         Subscription.is_active == True
     ).all()
     
-    if not subscriptions:
+    # Get user's active custom RSS feeds
+    custom_feeds = db.query(CustomRSSFeed).filter(
+        CustomRSSFeed.user_id == current_user.id,
+        CustomRSSFeed.is_active == True
+    ).all()
+    
+    # Collect unique topics from subscriptions and custom RSS feeds
+    topics = set([sub.topic for sub in subscriptions])
+    topics.update([feed.topic for feed in custom_feeds])
+    topics = list(topics)
+    
+    if not topics:
         raise HTTPException(
             status_code=400,
             detail="No active subscriptions found"
         )
     
     today = date.today().strftime("%Y-%m-%d")
-    
-    # Collect unique topics
-    topics = list(set([sub.topic for sub in subscriptions]))
     
     # Check refresh status for each topic
     refresh_results = []
@@ -269,11 +298,21 @@ async def get_refresh_status(
         Subscription.is_active == True
     ).all()
     
-    if not subscriptions:
+    # Get user's active custom RSS feeds
+    custom_feeds = db.query(CustomRSSFeed).filter(
+        CustomRSSFeed.user_id == current_user.id,
+        CustomRSSFeed.is_active == True
+    ).all()
+    
+    # Collect unique topics from both subscriptions and custom RSS feeds
+    topics = set([sub.topic for sub in subscriptions])
+    topics.update([feed.topic for feed in custom_feeds])
+    topics = list(topics)
+    
+    if not topics:
         return {"topics": []}
     
     today = date.today().strftime("%Y-%m-%d")
-    topics = list(set([sub.topic for sub in subscriptions]))
     
     statuses = []
     for topic in topics:

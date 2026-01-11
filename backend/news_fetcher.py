@@ -4,6 +4,8 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from database import settings
 import logging
+import hashlib
+import uuid
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -201,6 +203,22 @@ class NewsFetcher:
             logger.error(f"NewsData fetch error: {str(e)}")
             return []
     
+    def _generate_entry_id(self, feed_url: str, entry) -> str:
+        """Generate unique entry ID from feed_url + guid/link"""
+        # Try guid first, then link, then id
+        guid = entry.get("id") or entry.get("guid") or entry.get("link", "")
+        
+        if not guid:
+            # Last resort: use title + url hash
+            title = entry.get("title", "")
+            url = entry.get("link", "")
+            guid = f"{title}:{url}"
+        
+        # Create hash from feed_url + guid
+        combined = f"{feed_url}:{guid}"
+        entry_id = hashlib.sha256(combined.encode('utf-8')).hexdigest()
+        return entry_id
+    
     def _fetch_from_rss(self, topic: str, max_articles: int) -> List[Dict]:
         """Fetch from RSS feeds (fallback)"""
         articles = []
@@ -228,13 +246,18 @@ class NewsFetcher:
                     if not title and not summary:
                         continue
                     
+                    # Generate unique entry ID
+                    entry_id = self._generate_entry_id(feed_url, entry)
+                    
                     articles.append({
                         "title": title,
                         "url": entry.get("link", ""),
                         "source": feed.feed.get("title", "RSS Feed"),
                         "published_at": self._parse_datetime(entry.get("published")),
                         "content": summary,
-                        "image_url": self._extract_image_from_entry(entry)
+                        "image_url": self._extract_image_from_entry(entry),
+                        "entry_id": entry_id,  # Add entry_id for RSS articles
+                        "feed_url": feed_url  # Add feed_url for tracking
                     })
                     
                     if len(articles) >= max_articles:
@@ -255,7 +278,9 @@ class NewsFetcher:
                 "source": "系统消息",
                 "published_at": datetime.now(),
                 "content": f"我们正在努力为您获取{topic}相关新闻，请稍后刷新重试。",
-                "image_url": None
+                "image_url": None,
+                "entry_id": None,  # Default article has no entry_id
+                "feed_url": None
             })
         
         return articles[:max_articles]

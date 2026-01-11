@@ -18,6 +18,7 @@ interface CustomRSSFeed {
   topic: string;
   feed_url: string;
   is_active: boolean;
+  roast_mode: boolean;
   created_at: string;
 }
 
@@ -128,6 +129,15 @@ export default function SubscriptionManager({ onUpdate }: Props) {
       await loadCustomRSSFeeds();
     } catch (error) {
       console.error('Failed to toggle custom RSS feed:', error);
+    }
+  };
+
+  const handleToggleCustomRSSRoastMode = async (id: number, currentRoastMode: boolean) => {
+    try {
+      await subscriptionsAPI.updateCustomRSSFeed(id, { roast_mode: !currentRoastMode });
+      await loadCustomRSSFeeds();
+    } catch (error) {
+      console.error('Failed to toggle custom RSS roast mode:', error);
     }
   };
 
@@ -287,14 +297,26 @@ export default function SubscriptionManager({ onUpdate }: Props) {
                     <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-1">
                       {feed.feed_url}
                     </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Switch
-                        checked={feed.is_active}
-                        onCheckedChange={() => handleToggleCustomRSSFeed(feed.id, feed.is_active)}
-                      />
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {feed.is_active ? '已启用' : '已禁用'}
-                      </span>
+                    <div className="flex flex-col gap-2 mt-2">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={feed.is_active}
+                          onCheckedChange={() => handleToggleCustomRSSFeed(feed.id, feed.is_active)}
+                        />
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {feed.is_active ? '已订阅' : '未订阅'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={feed.roast_mode}
+                          onCheckedChange={() => handleToggleCustomRSSRoastMode(feed.id, feed.roast_mode)}
+                          disabled={!feed.is_active}
+                        />
+                        <span className={`text-xs ${feed.is_active ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400 dark:text-slate-600'}`}>
+                          {feed.roast_mode ? '吐槽模式' : '正常模式'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <Button

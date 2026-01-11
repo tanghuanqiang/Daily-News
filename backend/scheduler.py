@@ -4,7 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
 from database import SessionLocal, settings
-from models import User, Subscription, NewsCache, SystemLog, TopicRefreshStatus
+from models import User, Subscription, NewsCache, SystemLog, TopicRefreshStatus, CustomRSSFeed
 from news_fetcher import NewsFetcher, deduplicate_articles
 from summarizer import get_summarizer
 import logging
@@ -33,13 +33,29 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
         dict: {"success": bool, "articles_count": int, "error": str}
     """
     try:
-        fetcher = NewsFetcher()
+        # Get all active custom RSS feeds for this topic (from all users)
+        custom_feeds = db.query(CustomRSSFeed).filter(
+            CustomRSSFeed.topic == topic,
+            CustomRSSFeed.is_active == True
+        ).all()
+        
+        # Convert to list of dicts for NewsFetcher
+        custom_rss_feeds = [
+            {
+                "topic": feed.topic,
+                "feed_url": feed.feed_url,
+                "is_active": feed.is_active
+            }
+            for feed in custom_feeds
+        ]
+        
+        fetcher = NewsFetcher(custom_rss_feeds=custom_rss_feeds)
         summarizer = get_summarizer()
         
         logger.info(f"Fetching news for topic: {topic} (date: {date_str})")
         
-        # Fetch news articles
-        articles = fetcher.fetch_news(topic, max_articles=8)
+        # Fetch news articles - limit to 16 per topic
+        articles = fetcher.fetch_news(topic, max_articles=16)
         
         if not articles:
             logger.warning(f"No articles found for topic: {topic}")
@@ -48,12 +64,38 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
         # Deduplicate
         articles = deduplicate_articles(articles)
         
+        # Limit to 16 articles
+        articles = articles[:16]
+        
         updated_count = 0
         created_count = 0
         
-        # Generate summaries for both modes
+        # Process articles one by one and save immediately
         for article in articles:
             try:
+                # For RSS articles, check by entry_id first (before LLM processing)
+                entry_id = article.get("entry_id")
+                existing = None
+                
+                if entry_id:
+                    # Check if article already exists by entry_id (for RSS feeds)
+                    existing = db.query(NewsCache).filter(
+                        NewsCache.entry_id == entry_id
+                    ).first()
+                else:
+                    # For non-RSS articles (GNews, NewsData), check by URL + date + topic
+                    existing = db.query(NewsCache).filter(
+                        NewsCache.url == article["url"],
+                        NewsCache.date == date_str,
+                        NewsCache.topic == topic
+                    ).first()
+                
+                # If already exists, skip LLM processing
+                if existing:
+                    logger.debug(f"Article already exists, skipping LLM processing: {article.get('title', 'Unknown')[:50]}...")
+                    continue
+                
+                # Only process with LLM if article doesn't exist
                 # Normal summary
                 summary_normal = summarizer.generate_summary(
                     article["title"],
@@ -75,42 +117,33 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
                     article.get("content", "")
                 )
                 
-                # Check if article already exists
-                existing = db.query(NewsCache).filter(
-                    NewsCache.url == article["url"],
-                    NewsCache.date == date_str,
-                    NewsCache.topic == topic
-                ).first()
+                # Create new cache entry
+                news_cache = NewsCache(
+                    topic=topic,
+                    title=article["title"],
+                    summary=summary_normal,
+                    summary_roast=summary_roast,
+                    url=article["url"],
+                    source=article.get("source"),
+                    image_url=article.get("image_url"),
+                    published_at=article.get("published_at"),
+                    date=date_str,
+                    relevance_score=relevance_score,
+                    raw_content=article.get("content", "")[:1000],  # Truncate
+                    entry_id=entry_id  # Store entry_id for RSS articles
+                )
+                db.add(news_cache)
+                created_count += 1
                 
-                if existing:
-                    # Update existing
-                    existing.summary = summary_normal
-                    existing.summary_roast = summary_roast
-                    existing.relevance_score = relevance_score
-                    updated_count += 1
-                else:
-                    # Create new cache entry
-                    news_cache = NewsCache(
-                        topic=topic,
-                        title=article["title"],
-                        summary=summary_normal,
-                        summary_roast=summary_roast,
-                        url=article["url"],
-                        source=article.get("source"),
-                        image_url=article.get("image_url"),
-                        published_at=article.get("published_at"),
-                        date=date_str,
-                        relevance_score=relevance_score,
-                        raw_content=article.get("content", "")[:1000]  # Truncate
-                    )
-                    db.add(news_cache)
-                    created_count += 1
+                # Commit after each article to save immediately
+                db.commit()
+                logger.debug(f"Saved article '{article.get('title', 'Unknown')[:50]}...' for topic {topic}")
                     
             except Exception as e:
                 logger.error(f"Error processing article '{article.get('title', 'Unknown')}' for topic {topic}: {str(e)}")
+                db.rollback()  # Rollback on error
                 continue
         
-        db.commit()
         total_count = updated_count + created_count
         logger.info(f"Updated {total_count} articles for topic: {topic} (created: {created_count}, updated: {updated_count})")
         
@@ -277,14 +310,22 @@ def update_news_for_user(user_id: int, db: Session):
             Subscription.is_active == True
         ).all()
         
-        if not subscriptions:
-            logger.info(f"No active subscriptions for user {user.email}")
+        # Get user's active custom RSS feeds
+        custom_feeds = db.query(CustomRSSFeed).filter(
+            CustomRSSFeed.user_id == user_id,
+            CustomRSSFeed.is_active == True
+        ).all()
+        
+        # Collect unique topics from both subscriptions and custom RSS feeds
+        topics = set([sub.topic for sub in subscriptions])
+        topics.update([feed.topic for feed in custom_feeds])
+        topics = list(topics)
+        
+        if not topics:
+            logger.info(f"No active subscriptions or custom RSS feeds for user {user.email}")
             return
         
         today = date.today().strftime("%Y-%m-%d")
-        
-        # Collect unique topics
-        topics = list(set([sub.topic for sub in subscriptions]))
         
         # Refresh each topic (will use lock protection)
         for topic in topics:
@@ -317,10 +358,19 @@ def daily_news_update():
                 Subscription.is_active == True
             ).all()
             
-            if subscriptions:
+            # Get user's active custom RSS feeds
+            custom_feeds = db.query(CustomRSSFeed).filter(
+                CustomRSSFeed.user_id == user.id,
+                CustomRSSFeed.is_active == True
+            ).all()
+            
+            # Collect topics from both subscriptions and custom RSS feeds
+            user_topics = set([sub.topic for sub in subscriptions])
+            user_topics.update([feed.topic for feed in custom_feeds])
+            
+            if user_topics:
                 user_count += 1
-                for sub in subscriptions:
-                    all_topics.add(sub.topic)
+                all_topics.update(user_topics)
         
         logger.info(f"Found {len(all_topics)} unique topics from {user_count} users with subscriptions")
         
@@ -384,8 +434,18 @@ def send_scheduled_emails():
                 Subscription.user_id == user.id,
                 Subscription.is_active == True
             ).all()
+            
+            # Get user's active custom RSS feeds
+            custom_feeds = db.query(CustomRSSFeed).filter(
+                CustomRSSFeed.user_id == user.id,
+                CustomRSSFeed.is_active == True
+            ).all()
+            
+            # Collect topics from both subscriptions and custom RSS feeds
             for sub in subscriptions:
                 all_topics.add(sub.topic)
+            for feed in custom_feeds:
+                all_topics.add(feed.topic)
         
         # Refresh topics (optimized)
         today = date.today().strftime("%Y-%m-%d")

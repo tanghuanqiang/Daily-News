@@ -5,7 +5,7 @@ import { authAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Newspaper, Loader2, Mail, Lock, AlertCircle, CheckCircle2, UserPlus } from 'lucide-react';
+import { Newspaper, Loader2, Mail, Lock, AlertCircle, CheckCircle2, UserPlus, Eye, EyeOff } from 'lucide-react';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -17,6 +17,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+  const [showPasswords, setShowPasswords] = useState(false); // 联动控制两个密码框
   
   const navigate = useNavigate();
   const { setToken, setUser } = useAuthStore();
@@ -165,10 +166,9 @@ export default function RegisterPage() {
               <Input
                 id="verificationCode"
                 type="text"
-                placeholder="输入6位验证码"
+                placeholder="输入验证码"
                 value={verificationCode}
-                onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
-                maxLength={6}
+                onChange={(e) => setVerificationCode(e.target.value)}
                 className="h-11 border-slate-300 dark:border-slate-600 focus:border-primary text-center text-lg tracking-widest"
                 required
                 disabled={loading}
@@ -180,16 +180,31 @@ export default function RegisterPage() {
                 <Lock className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                 密码
               </label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="至少6个字符"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-11 border-slate-300 dark:border-slate-600 focus:border-primary"
-                required
-                disabled={loading}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPasswords ? "text" : "password"}
+                  placeholder="至少6个字符"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-11 border-slate-300 dark:border-slate-600 focus:border-primary pr-10"
+                  required
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(!showPasswords)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                  disabled={loading}
+                  title={showPasswords ? "隐藏密码" : "显示密码"}
+                >
+                  {showPasswords ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -197,16 +212,31 @@ export default function RegisterPage() {
                 <Lock className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                 确认密码
               </label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="再次输入密码"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="h-11 border-slate-300 dark:border-slate-600 focus:border-primary"
-                required
-                disabled={loading}
-              />
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showPasswords ? "text" : "password"}
+                  placeholder="再次输入密码"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="h-11 border-slate-300 dark:border-slate-600 focus:border-primary pr-10"
+                  required
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswords(!showPasswords)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                  disabled={loading}
+                  title={showPasswords ? "隐藏密码" : "显示密码"}
+                >
+                  {showPasswords ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
