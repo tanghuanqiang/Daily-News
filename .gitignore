@@ -40,6 +40,11 @@ wheels/
 *.swo
 *~
 
+# Development tools
+.cursor/
+.shared/
+.trae/
+
 # Node
 node_modules/
 npm-debug.log*

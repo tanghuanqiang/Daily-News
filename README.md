@@ -252,7 +252,7 @@ CORS_ORIGINS=http://localhost:5173,http://your-domain.com
 ## 📚 文档
 
 - [QUICKSTART.md](QUICKSTART.md) - 快速开始指南
-- [DEPLOYMENT.md](DEPLOYMENT.md) - 部署详细说明
+- [DEPLOYMENT.md](DEPLOYMENT.md) - 云平台部署指南（Railway + Vercel）
 - [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) - 部署检查清单
 
 ## 🔒 安全建议
