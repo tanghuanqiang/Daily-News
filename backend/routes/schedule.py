@@ -34,7 +34,7 @@ class UserScheduleStatus(BaseModel):
     last_email_sent_at: Optional[str]
 
 
-@router.get("/my", response_model=UserScheduleStatus)
+@router.get("/me", response_model=UserScheduleStatus)
 async def get_my_schedule(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -58,7 +58,7 @@ async def get_my_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/my")
+@router.put("/me")
 async def update_my_schedule(
     config: UserScheduleConfig,
     current_user: User = Depends(get_current_active_user),
@@ -119,7 +119,7 @@ async def update_my_schedule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/test")
+@router.post("/test-email")
 async def test_email_schedule(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)

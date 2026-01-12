@@ -28,7 +28,7 @@ def get_or_create_user_preference(user_id: int, db: Session) -> UserPreference:
     return preference
 
 
-@router.get("/", response_model=UserPreferenceResponse)
+@router.get("/me", response_model=UserPreferenceResponse)
 async def get_my_preferences(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -38,7 +38,7 @@ async def get_my_preferences(
     return preference
 
 
-@router.put("/", response_model=UserPreferenceResponse)
+@router.put("/me", response_model=UserPreferenceResponse)
 async def update_my_preferences(
     update_data: UserPreferenceUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -63,7 +63,7 @@ async def update_my_preferences(
     return preference
 
 
-@router.post("/mark-read/{news_id}")
+@router.post("/read/{news_id}")
 async def mark_news_read(
     news_id: int,
     current_user: User = Depends(get_current_active_user),
