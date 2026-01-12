@@ -11,7 +11,7 @@ cd backend
 pip install -r requirements.txt
 
 # 复制环境变量模板
-cp .env.example .env
+cp env.example .env
 ```
 
 **编辑 `.env` 文件，必须填写以下内容：**

@@ -25,14 +25,14 @@ echo.
 
 REM 检查.env文件
 if not exist .env (
-    echo [WARN] .env 文件不存在，从 .env.example 创建...
-    if exist .env.example (
-        copy .env.example .env >nul
+    echo [WARN] .env 文件不存在，从 env.example 创建...
+    if exist env.example (
+        copy env.example .env >nul
         echo [WARN] 请编辑 .env 文件，填入必需的配置（特别是 SECRET_KEY 和 LLM API密钥）
         echo [WARN] 编辑完成后，请重新运行此脚本
         exit /b 1
     ) else (
-        echo [ERROR] .env.example 文件不存在，无法创建 .env 文件
+        echo [ERROR] env.example 文件不存在，无法创建 .env 文件
         exit /b 1
     )
 )

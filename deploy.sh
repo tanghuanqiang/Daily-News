@@ -46,14 +46,14 @@ main() {
 
     # 检查.env文件
     if [ ! -f .env ]; then
-        print_warn ".env 文件不存在，从 .env.example 创建..."
-        if [ -f .env.example ]; then
-            cp .env.example .env
+        print_warn ".env 文件不存在，从 env.example 创建..."
+        if [ -f env.example ]; then
+            cp env.example .env
             print_warn "请编辑 .env 文件，填入必需的配置（特别是 SECRET_KEY 和 LLM API密钥）"
             print_warn "编辑完成后，请重新运行此脚本"
             exit 1
         else
-            print_error ".env.example 文件不存在，无法创建 .env 文件"
+            print_error "env.example 文件不存在，无法创建 .env 文件"
             exit 1
         fi
     fi
