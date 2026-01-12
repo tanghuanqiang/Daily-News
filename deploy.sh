@@ -101,18 +101,46 @@ main() {
 
     # 检查端口占用
     print_info "检查端口占用..."
-    BACKEND_PORT=${BACKEND_PORT:-6666}
-    FRONTEND_PORT=${FRONTEND_PORT:-16666}
+    BACKEND_PORT=${BACKEND_PORT:-18888}
+    FRONTEND_PORT=${FRONTEND_PORT:-18889}
+    POSTGRES_PORT=${POSTGRES_PORT:-15432}
+    
+    PORT_CONFLICT=0
     
     if command -v netstat &> /dev/null; then
         if netstat -tuln | grep -q ":$BACKEND_PORT "; then
-            print_warn "端口 $BACKEND_PORT 已被占用，请修改 BACKEND_PORT 或停止占用该端口的服务"
+            print_warn "端口 $BACKEND_PORT (后端) 已被占用，请修改 BACKEND_PORT 或停止占用该端口的服务"
+            PORT_CONFLICT=1
         fi
         if netstat -tuln | grep -q ":$FRONTEND_PORT "; then
-            print_warn "端口 $FRONTEND_PORT 已被占用，请修改 FRONTEND_PORT 或停止占用该端口的服务"
+            print_warn "端口 $FRONTEND_PORT (前端) 已被占用，请修改 FRONTEND_PORT 或停止占用该端口的服务"
+            PORT_CONFLICT=1
+        fi
+        if netstat -tuln | grep -q ":$POSTGRES_PORT "; then
+            print_warn "端口 $POSTGRES_PORT (PostgreSQL) 已被占用，请修改 POSTGRES_PORT 或停止占用该端口的服务"
+            PORT_CONFLICT=1
+        fi
+    elif command -v ss &> /dev/null; then
+        if ss -tuln | grep -q ":$BACKEND_PORT "; then
+            print_warn "端口 $BACKEND_PORT (后端) 已被占用，请修改 BACKEND_PORT 或停止占用该端口的服务"
+            PORT_CONFLICT=1
+        fi
+        if ss -tuln | grep -q ":$FRONTEND_PORT "; then
+            print_warn "端口 $FRONTEND_PORT (前端) 已被占用，请修改 FRONTEND_PORT 或停止占用该端口的服务"
+            PORT_CONFLICT=1
+        fi
+        if ss -tuln | grep -q ":$POSTGRES_PORT "; then
+            print_warn "端口 $POSTGRES_PORT (PostgreSQL) 已被占用，请修改 POSTGRES_PORT 或停止占用该端口的服务"
+            PORT_CONFLICT=1
         fi
     fi
-    print_info "✓ 端口检查完成"
+    
+    if [ $PORT_CONFLICT -eq 1 ]; then
+        print_warn "检测到端口冲突，建议修改 .env 文件中的端口配置"
+        print_warn "当前配置：后端=$BACKEND_PORT, 前端=$FRONTEND_PORT, PostgreSQL=$POSTGRES_PORT"
+    else
+        print_info "✓ 端口检查通过（后端=$BACKEND_PORT, 前端=$FRONTEND_PORT, PostgreSQL=$POSTGRES_PORT）"
+    fi
     echo ""
 
     # 构建镜像
@@ -153,9 +181,9 @@ main() {
     print_info "========================================="
     echo ""
     print_info "服务访问地址:"
-    print_info "  前端: http://localhost:${FRONTEND_PORT:-80}"
-    print_info "  后端API: http://localhost:${BACKEND_PORT:-8000}"
-    print_info "  API文档: http://localhost:${BACKEND_PORT:-8000}/docs"
+    print_info "  前端: http://localhost:${FRONTEND_PORT:-18889}"
+    print_info "  后端API: http://localhost:${BACKEND_PORT:-18888}"
+    print_info "  API文档: http://localhost:${BACKEND_PORT:-18888}/docs"
     echo ""
     print_info "常用命令:"
     print_info "  查看日志: docker-compose logs -f"

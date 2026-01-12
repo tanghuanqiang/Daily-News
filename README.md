@@ -186,9 +186,11 @@ docker-compose up -d --build
 ```
 
 **访问地址：**
-- 前端：http://localhost
-- 后端API：http://localhost:8000
-- API文档：http://localhost:8000/docs
+- 前端：http://localhost:18889（默认端口，可在 .env 中配置 FRONTEND_PORT）
+- 后端API：http://localhost:18888（默认端口，可在 .env 中配置 BACKEND_PORT）
+- API文档：http://localhost:18888/docs
+
+**注意：** 默认端口已配置为避免与 dailynews 等常见服务冲突。如需修改，请编辑 `.env` 文件中的 `BACKEND_PORT`、`FRONTEND_PORT` 和 `POSTGRES_PORT`。
 
 ### 本地开发
 
