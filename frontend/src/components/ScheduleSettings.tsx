@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { scheduleAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, Mail, Send, Clock } from 'lucide-react';
+import { Loader2, Send, Clock } from 'lucide-react';
 
 interface ScheduleConfig {
   enabled: boolean;

@@ -13,8 +13,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python build directories (use full path to avoid matching frontend/src/lib)
+/lib/
+/lib64/
+# Don't ignore frontend lib folder
+!frontend/src/lib/
 parts/
 sdist/
 var/

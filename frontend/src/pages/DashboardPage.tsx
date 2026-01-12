@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { newsAPI, preferencesAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspaper, Sparkles, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspaper, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useToast } from '@/components/ui/use-toast';
@@ -44,9 +44,9 @@ export default function DashboardPage() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshStatus, setRefreshStatus] = useState<RefreshResult[]>([]);
+  const [, setRefreshStatus] = useState<RefreshResult[]>([]);
   const [darkMode, setDarkMode] = useState(false);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const refreshToastRef = useRef<{ id: string; update: (props: any) => void; dismiss: () => void } | null>(null);
   
   const { user, logout } = useAuthStore();

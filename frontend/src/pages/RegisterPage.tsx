@@ -5,7 +5,7 @@ import { authAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Newspaper, Loader2, Mail, Lock, AlertCircle, CheckCircle2, UserPlus, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Mail, Lock, AlertCircle, CheckCircle2, UserPlus, Eye, EyeOff } from 'lucide-react';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
