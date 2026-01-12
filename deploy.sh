@@ -101,8 +101,8 @@ main() {
 
     # 检查端口占用
     print_info "检查端口占用..."
-    BACKEND_PORT=${BACKEND_PORT:-8000}
-    FRONTEND_PORT=${FRONTEND_PORT:-80}
+    BACKEND_PORT=${BACKEND_PORT:-6666}
+    FRONTEND_PORT=${FRONTEND_PORT:-16666}
     
     if command -v netstat &> /dev/null; then
         if netstat -tuln | grep -q ":$BACKEND_PORT "; then

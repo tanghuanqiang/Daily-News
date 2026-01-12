@@ -9,7 +9,7 @@ services:
     container_name: daily-digest-backend
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "${BACKEND_PORT:-6666}:8000"
     environment:
       - HOST=0.0.0.0
       - PORT=8000
@@ -76,13 +76,13 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:6666}
     container_name: daily-digest-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "${FRONTEND_PORT:-16666}:80"
     environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:6666}
     networks:
       - daily-digest-network
     depends_on:

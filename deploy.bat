@@ -70,9 +70,9 @@ echo [INFO] 部署完成！
 echo [INFO] =========================================
 echo.
 echo [INFO] 服务访问地址:
-echo [INFO]   前端: http://localhost:80
-echo [INFO]   后端API: http://localhost:8000
-echo [INFO]   API文档: http://localhost:8000/docs
+echo [INFO]   前端: http://localhost:16666
+echo [INFO]   后端API: http://localhost:6666
+echo [INFO]   API文档: http://localhost:6666/docs
 echo.
 echo [INFO] 常用命令:
 echo [INFO]   查看日志: docker-compose logs -f
