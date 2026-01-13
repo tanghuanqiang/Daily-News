@@ -7,11 +7,9 @@ import { Loader2, Send, Clock } from 'lucide-react';
 
 interface ScheduleConfig {
   enabled: boolean;
-  schedule_type: 'daily' | 'weekly' | 'interval';
+  schedule_type: 'daily';
   hour?: number;
   minute?: number;
-  day_of_week?: number;
-  interval_hours?: number;
   last_email_sent_at?: string | null;
 }
 
@@ -21,8 +19,6 @@ export default function ScheduleSettings() {
     schedule_type: 'daily',
     hour: 9,
     minute: 0,
-    day_of_week: 0,
-    interval_hours: 24,
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -47,7 +43,11 @@ export default function ScheduleSettings() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      await scheduleAPI.updateMySchedule(config);
+      // 确保 schedule_type 为 daily
+      await scheduleAPI.updateMySchedule({
+        ...config,
+        schedule_type: 'daily'
+      });
       alert('定时设置已保存！');
       await loadSchedule();
     } catch (error: any) {
@@ -100,154 +100,42 @@ export default function ScheduleSettings() {
 
       {config.enabled && (
         <div className="space-y-5 pt-2">
-          {/* Schedule Type - Mobile Optimized */}
-          <div className="space-y-3">
-            <label className="text-sm font-medium text-slate-900 dark:text-slate-50 block">
-              发送频率
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                variant={config.schedule_type === 'daily' ? 'default' : 'outline'}
-                size="default"
-                onClick={() => setConfig({ ...config, schedule_type: 'daily' })}
-                className="h-11 cursor-pointer transition-colors"
-              >
-                每天
-              </Button>
-              <Button
-                variant={config.schedule_type === 'weekly' ? 'default' : 'outline'}
-                size="default"
-                onClick={() => setConfig({ ...config, schedule_type: 'weekly' })}
-                className="h-11 cursor-pointer transition-colors"
-              >
-                每周
-              </Button>
-              <Button
-                variant={config.schedule_type === 'interval' ? 'default' : 'outline'}
-                size="default"
-                onClick={() => setConfig({ ...config, schedule_type: 'interval' })}
-                className="h-11 cursor-pointer transition-colors"
-              >
-                间隔
-              </Button>
-            </div>
-          </div>
-
           {/* Daily Schedule */}
-          {config.schedule_type === 'daily' && (
-            <div className="space-y-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                <label className="text-sm font-medium text-slate-900 dark:text-slate-50">
-                  每天发送时间
-                </label>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <Input
-                    type="number"
-                    min="0"
-                    max="23"
-                    value={config.hour || 9}
-                    onChange={(e) => setConfig({ ...config, hour: parseInt(e.target.value) || 9 })}
-                    className="h-11 text-center text-base"
-                  />
-                </div>
-                <span className="text-slate-500 dark:text-slate-400 font-medium">:</span>
-                <div className="flex-1">
-                  <Input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={config.minute || 0}
-                    onChange={(e) => setConfig({ ...config, minute: parseInt(e.target.value) || 0 })}
-                    className="h-11 text-center text-base"
-                  />
-                </div>
-                <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">时:分</span>
-              </div>
-            </div>
-          )}
-
-          {/* Weekly Schedule */}
-          {config.schedule_type === 'weekly' && (
-            <div className="space-y-4 p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-              <div className="space-y-3">
-                <label className="text-sm font-medium text-slate-900 dark:text-slate-50 block">
-                  每周发送日期
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((day, index) => (
-                    <Button
-                      key={index}
-                      variant={config.day_of_week === index ? 'default' : 'outline'}
-                      size="default"
-                      onClick={() => setConfig({ ...config, day_of_week: index })}
-                      className="h-10 cursor-pointer transition-colors text-xs"
-                    >
-                      {day}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-slate-500 dark:text-slate-400" />
-                  <label className="text-sm font-medium text-slate-900 dark:text-slate-50">
-                    发送时间
-                  </label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <Input
-                      type="number"
-                      min="0"
-                      max="23"
-                      value={config.hour || 9}
-                      onChange={(e) => setConfig({ ...config, hour: parseInt(e.target.value) || 9 })}
-                      className="h-11 text-center text-base"
-                    />
-                  </div>
-                  <span className="text-slate-500 dark:text-slate-400 font-medium">:</span>
-                  <div className="flex-1">
-                    <Input
-                      type="number"
-                      min="0"
-                      max="59"
-                      value={config.minute || 0}
-                      onChange={(e) => setConfig({ ...config, minute: parseInt(e.target.value) || 0 })}
-                      className="h-11 text-center text-base"
-                    />
-                  </div>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">时:分</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Interval Schedule */}
-          {config.schedule_type === 'interval' && (
-            <div className="space-y-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-              <label className="text-sm font-medium text-slate-900 dark:text-slate-50 block">
-                发送间隔
+          <div className="space-y-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-50">
+                每天发送时间
               </label>
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <Input
-                    type="number"
-                    min="1"
-                    value={config.interval_hours || 24}
-                    onChange={(e) => setConfig({ ...config, interval_hours: parseInt(e.target.value) || 24 })}
-                    className="h-11 text-center text-base"
-                  />
-                </div>
-                <span className="text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">小时</span>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">
-                例如：设置为 12 表示每 12 小时发送一次
-              </p>
             </div>
-          )}
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <Input
+                  type="number"
+                  min="0"
+                  max="23"
+                  value={config.hour || 9}
+                  onChange={(e) => setConfig({ ...config, hour: parseInt(e.target.value) || 9 })}
+                  className="h-11 text-center text-base"
+                />
+              </div>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">:</span>
+              <div className="flex-1">
+                <Input
+                  type="number"
+                  min="0"
+                  max="59"
+                  value={config.minute || 0}
+                  onChange={(e) => setConfig({ ...config, minute: parseInt(e.target.value) || 0 })}
+                  className="h-11 text-center text-base"
+                />
+              </div>
+              <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">时:分</span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 pt-1">
+              建议 9 点（系统每日 8 点更新）
+            </p>
+          </div>
 
           {/* Last Email Sent Info */}
           {config.last_email_sent_at && (

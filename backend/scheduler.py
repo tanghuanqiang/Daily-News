@@ -387,9 +387,6 @@ def daily_news_update():
             else:
                 refreshed_topics += 1
         
-        # Send email notifications
-        send_daily_emails(db)
-        
         # Log completion
         log = SystemLog(
             log_type="fetch",
@@ -467,53 +464,25 @@ def send_scheduled_emails():
 
 
 def should_send_email_to_user(user: User, current_time: datetime) -> bool:
-    """检查是否应该向用户发送邮件（根据用户的定时配置）"""
+    """检查是否应该向用户发送邮件（根据用户的定时配置，仅支持每天固定时间）"""
     if not user.email_notifications or not user.email_schedule_enabled:
         return False
     
+    # 只支持 daily 模式
     schedule_type = user.email_schedule_type
+    if schedule_type != "daily":
+        return False
+    
     last_sent = user.last_email_sent_at
     
-    if schedule_type == "daily":
-        # 每天固定时间发送
-        target_hour = user.email_schedule_hour
-        target_minute = user.email_schedule_minute
-        
-        # 检查当前时间是否匹配目标时间（允许在目标时间后的1小时内发送）
-        if current_time.hour == target_hour and current_time.minute >= target_minute:
-            # 如果今天还没发送过
-            if not last_sent or last_sent.date() < current_time.date():
-                return True
+    # 每天固定时间发送
+    target_hour = user.email_schedule_hour
+    target_minute = user.email_schedule_minute
     
-    elif schedule_type == "weekly":
-        # 每周固定日期和时间发送
-        target_day = user.email_schedule_day_of_week
-        target_hour = user.email_schedule_hour
-        target_minute = user.email_schedule_minute
-        
-        # 检查当前是否是目标日期（0=周一，6=周日）
-        current_day = current_time.weekday()  # 0=周一，6=周日
-        
-        if current_day == target_day:
-            if current_time.hour == target_hour and current_time.minute >= target_minute:
-                # 如果这周还没发送过（检查上次发送是否在7天前）
-                if not last_sent:
-                    return True
-                days_since_last = (current_time - last_sent).days
-                if days_since_last >= 7:
-                    return True
-    
-    elif schedule_type == "interval":
-        # 间隔发送
-        interval_hours = user.email_schedule_interval_hours
-        
-        if not last_sent:
-            # 从未发送过，立即发送
-            return True
-        
-        # 检查是否已经过了间隔时间
-        hours_since_last = (current_time - last_sent).total_seconds() / 3600
-        if hours_since_last >= interval_hours:
+    # 检查当前时间是否匹配目标时间（允许在目标时间后的1小时内发送）
+    if current_time.hour == target_hour and current_time.minute >= target_minute:
+        # 如果今天还没发送过
+        if not last_sent or last_sent.date() < current_time.date():
             return True
     
     return False

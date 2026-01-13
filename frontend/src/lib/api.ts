@@ -73,11 +73,9 @@ export const scheduleAPI = {
   
   updateMySchedule: (config: {
     enabled?: boolean;
-    schedule_type?: 'daily' | 'weekly' | 'interval';
+    schedule_type?: 'daily';
     hour?: number;
     minute?: number;
-    day_of_week?: number;
-    interval_hours?: number;
   }) => api.put('/api/schedule/me', config),
   
   testEmail: () => api.post('/api/schedule/test-email'),
