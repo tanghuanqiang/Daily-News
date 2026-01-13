@@ -87,11 +87,19 @@ export default function SubscriptionManager({ onUpdate }: Props) {
 
   const handleToggleRoast = async (id: number, currentMode: boolean) => {
     try {
+      // 先更新本地状态以保持顺序
+      setSubscriptions(prev => 
+        prev.map(sub => 
+          sub.id === id ? { ...sub, roast_mode: !currentMode } : sub
+        )
+      );
+      // 然后更新后端
       await subscriptionsAPI.update(id, { roast_mode: !currentMode });
-      await loadSubscriptions();
       onUpdate();
     } catch (error) {
       console.error('Failed to toggle roast mode:', error);
+      // 如果更新失败，重新加载列表以恢复正确状态
+      await loadSubscriptions();
     }
   };
 
@@ -125,19 +133,35 @@ export default function SubscriptionManager({ onUpdate }: Props) {
 
   const handleToggleCustomRSSFeed = async (id: number, currentActive: boolean) => {
     try {
+      // 先更新本地状态以保持顺序
+      setCustomRSSFeeds(prev => 
+        prev.map(feed => 
+          feed.id === id ? { ...feed, is_active: !currentActive } : feed
+        )
+      );
+      // 然后更新后端
       await subscriptionsAPI.updateCustomRSSFeed(id, { is_active: !currentActive });
-      await loadCustomRSSFeeds();
     } catch (error) {
       console.error('Failed to toggle custom RSS feed:', error);
+      // 如果更新失败，重新加载列表以恢复正确状态
+      await loadCustomRSSFeeds();
     }
   };
 
   const handleToggleCustomRSSRoastMode = async (id: number, currentRoastMode: boolean) => {
     try {
+      // 先更新本地状态以保持顺序
+      setCustomRSSFeeds(prev => 
+        prev.map(feed => 
+          feed.id === id ? { ...feed, roast_mode: !currentRoastMode } : feed
+        )
+      );
+      // 然后更新后端
       await subscriptionsAPI.updateCustomRSSFeed(id, { roast_mode: !currentRoastMode });
-      await loadCustomRSSFeeds();
     } catch (error) {
       console.error('Failed to toggle custom RSS roast mode:', error);
+      // 如果更新失败，重新加载列表以恢复正确状态
+      await loadCustomRSSFeeds();
     }
   };
 

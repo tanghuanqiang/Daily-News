@@ -27,7 +27,7 @@ async def get_subscriptions(
     subscriptions = db.query(Subscription).filter(
         Subscription.user_id == current_user.id,
         Subscription.is_active == True
-    ).all()
+    ).order_by(Subscription.created_at.asc()).all()
     return subscriptions
 
 
@@ -150,7 +150,7 @@ async def get_custom_rss_feeds(
     """Get all custom RSS feeds for current user"""
     feeds = db.query(CustomRSSFeed).filter(
         CustomRSSFeed.user_id == current_user.id
-    ).all()
+    ).order_by(CustomRSSFeed.created_at.asc()).all()
     return feeds
 
 

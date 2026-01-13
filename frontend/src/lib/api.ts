@@ -1,28 +1,61 @@
 import axios from 'axios';
 
-// 如果 VITE_API_URL 未设置或为空，使用相对路径（适用于生产环境通过 nginx 代理）
+// API URL 配置
 // 开发环境：VITE_API_URL=http://localhost:18888
-// 生产环境：VITE_API_URL=https://dailynews.domtang.asia 或留空使用相对路径
+// 生产环境：建议留空（使用相对路径）或设置为 https://dailynews.domtang.asia
+// 使用相对路径（空字符串）会自动继承当前页面的协议，最适合同域部署
 let API_URL = import.meta.env.VITE_API_URL;
 
-// 如果 VITE_API_URL 未设置或为空字符串
+// 处理 API URL
 if (!API_URL || API_URL === '') {
+  // 未设置或为空
   if (import.meta.env.DEV) {
     // 开发环境使用本地后端
     API_URL = 'http://localhost:18888';
   } else {
     // 生产环境使用相对路径，继承当前页面的协议（HTTPS）
+    // 这是最安全的方式，避免 Mixed Content 错误
     API_URL = '';
   }
 } else {
-  // 如果设置了 VITE_API_URL，确保在生产环境使用 HTTPS
-  // 如果当前页面是 HTTPS，但 API_URL 是 HTTP，则强制转换为 HTTPS
-  if (!import.meta.env.DEV && typeof window !== 'undefined') {
+  // 已设置 VITE_API_URL
+  // 在浏览器环境中，确保协议匹配当前页面
+  if (typeof window !== 'undefined') {
     const isHttps = window.location.protocol === 'https:';
-    if (isHttps && API_URL.startsWith('http://')) {
-      API_URL = API_URL.replace('http://', 'https://');
+    const currentHost = window.location.host;
+    
+    if (isHttps) {
+      // 当前页面是 HTTPS
+      if (API_URL.startsWith('http://')) {
+        // 如果 API URL 是 HTTP，强制转换为 HTTPS
+        API_URL = API_URL.replace('http://', 'https://');
+        console.warn('[API] 检测到 HTTPS 页面，已将 API URL 从 HTTP 转换为 HTTPS:', API_URL);
+      } else if (API_URL.startsWith('https://')) {
+        // 如果 API URL 是 HTTPS，检查域名是否匹配
+        try {
+          const apiHost = new URL(API_URL).host;
+          if (apiHost === currentHost) {
+            // 域名匹配，使用相对路径更安全（避免跨域和协议问题）
+            API_URL = '';
+            console.log('[API] 使用相对路径（同域部署，自动继承 HTTPS 协议）');
+          }
+        } catch (e) {
+          // URL 解析失败，保持原值
+          console.warn('[API] URL 解析失败，使用原始值:', API_URL);
+        }
+      }
+    } else {
+      // 当前页面是 HTTP（开发环境或测试环境）
+      // 保持原值不变
     }
   }
+}
+
+// 调试信息（开发环境或特定域名）
+if (import.meta.env.DEV || (typeof window !== 'undefined' && window.location.hostname.includes('dailynews.domtang.asia'))) {
+  console.log('[API Config] 最终 API URL:', API_URL || '(相对路径，继承当前协议)');
+  console.log('[API Config] 构建时 VITE_API_URL:', import.meta.env.VITE_API_URL || '(未设置)');
+  console.log('[API Config] 当前页面:', typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : 'N/A');
 }
 
 const api = axios.create({
@@ -32,12 +65,24 @@ const api = axios.create({
   },
 });
 
-// Add token to requests
+// Add token to requests and ensure HTTPS in production
 api.interceptors.request.use((config) => {
+  // 添加 token
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  
+  // 运行时强制检查：如果页面是 HTTPS，确保 baseURL 也是 HTTPS
+  // 这是最后的保障，防止构建时使用了 HTTP URL
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (config.baseURL && config.baseURL.startsWith('http://')) {
+      // 强制将 HTTP 转换为 HTTPS
+      config.baseURL = config.baseURL.replace('http://', 'https://');
+      console.warn('[API Interceptor] 检测到 HTTP baseURL，已强制转换为 HTTPS:', config.baseURL);
+    }
+  }
+  
   return config;
 });
 
