@@ -30,3 +30,5 @@ resend==0.7.0
 
 # Database
 alembic==1.13.1
+psycopg2-binary==2.9.9  # PostgreSQL driver (required if using PostgreSQL)
+psycopg2-binary==2.9.9  # PostgreSQL driver (required if using PostgreSQL)
