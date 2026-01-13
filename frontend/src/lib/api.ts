@@ -3,11 +3,27 @@ import axios from 'axios';
 // 如果 VITE_API_URL 未设置或为空，使用相对路径（适用于生产环境通过 nginx 代理）
 // 开发环境：VITE_API_URL=http://localhost:18888
 // 生产环境：VITE_API_URL=https://dailynews.domtang.asia 或留空使用相对路径
-const API_URL = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ''
-  ? import.meta.env.VITE_API_URL
-  : import.meta.env.DEV
-  ? 'http://localhost:18888'
-  : ''; // 生产环境使用相对路径，通过 nginx HTTPS 代理
+let API_URL = import.meta.env.VITE_API_URL;
+
+// 如果 VITE_API_URL 未设置或为空字符串
+if (!API_URL || API_URL === '') {
+  if (import.meta.env.DEV) {
+    // 开发环境使用本地后端
+    API_URL = 'http://localhost:18888';
+  } else {
+    // 生产环境使用相对路径，继承当前页面的协议（HTTPS）
+    API_URL = '';
+  }
+} else {
+  // 如果设置了 VITE_API_URL，确保在生产环境使用 HTTPS
+  // 如果当前页面是 HTTPS，但 API_URL 是 HTTP，则强制转换为 HTTPS
+  if (!import.meta.env.DEV && typeof window !== 'undefined') {
+    const isHttps = window.location.protocol === 'https:';
+    if (isHttps && API_URL.startsWith('http://')) {
+      API_URL = API_URL.replace('http://', 'https://');
+    }
+  }
+}
 
 const api = axios.create({
   baseURL: API_URL,
