@@ -1,6 +1,13 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:18888';
+// 如果 VITE_API_URL 未设置或为空，使用相对路径（适用于生产环境通过 nginx 代理）
+// 开发环境：VITE_API_URL=http://localhost:18888
+// 生产环境：VITE_API_URL=https://dailynews.domtang.asia 或留空使用相对路径
+const API_URL = import.meta.env.VITE_API_URL !== undefined && import.meta.env.VITE_API_URL !== ''
+  ? import.meta.env.VITE_API_URL
+  : import.meta.env.DEV
+  ? 'http://localhost:18888'
+  : ''; // 生产环境使用相对路径，通过 nginx HTTPS 代理
 
 const api = axios.create({
   baseURL: API_URL,
