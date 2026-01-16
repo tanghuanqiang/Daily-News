@@ -12,12 +12,19 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import uuid
+import pytz
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize scheduler
 scheduler = BackgroundScheduler(timezone=settings.TIMEZONE)
+
+
+def get_current_date_in_timezone() -> str:
+    """获取配置时区的当前日期（YYYY-MM-DD格式）"""
+    tz = pytz.timezone(settings.TIMEZONE)
+    return datetime.now(tz).date().strftime("%Y-%m-%d")
 
 
 def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str = None) -> dict:
@@ -325,7 +332,7 @@ def update_news_for_user(user_id: int, db: Session):
             logger.info(f"No active subscriptions or custom RSS feeds for user {user.email}")
             return
         
-        today = date.today().strftime("%Y-%m-%d")
+        today = get_current_date_in_timezone()
         
         # Refresh each topic (will use lock protection)
         for topic in topics:
@@ -374,7 +381,7 @@ def daily_news_update():
         
         logger.info(f"Found {len(all_topics)} unique topics from {user_count} users with subscriptions")
         
-        today = date.today().strftime("%Y-%m-%d")
+        today = get_current_date_in_timezone()
         
         # Refresh each topic (will handle locks and duplicates)
         refreshed_topics = 0
@@ -414,42 +421,17 @@ def daily_news_update():
 
 
 def send_scheduled_emails():
-    """定时邮件任务 - 检查所有用户并发送邮件（根据每个用户的配置）"""
+    """定时邮件任务 - 检查所有用户并发送邮件（根据每个用户的配置）
+    
+    注意：此函数只从数据库读取已缓存的新闻，不会触发新闻刷新。
+    新闻刷新由 daily_news_update 任务独立处理。
+    """
     logger.info("Starting scheduled email check task...")
     
     db = SessionLocal()
     try:
-        # First, update news for all users who have active subscriptions
-        # Use optimized topic-level refresh
-        users = db.query(User).filter(User.is_active == True).all()
-        logger.info(f"Checking email schedules for {len(users)} users")
-        
-        # Collect unique topics
-        all_topics = set()
-        for user in users:
-            subscriptions = db.query(Subscription).filter(
-                Subscription.user_id == user.id,
-                Subscription.is_active == True
-            ).all()
-            
-            # Get user's active custom RSS feeds
-            custom_feeds = db.query(CustomRSSFeed).filter(
-                CustomRSSFeed.user_id == user.id,
-                CustomRSSFeed.is_active == True
-            ).all()
-            
-            # Collect topics from both subscriptions and custom RSS feeds
-            for sub in subscriptions:
-                all_topics.add(sub.topic)
-            for feed in custom_feeds:
-                all_topics.add(feed.topic)
-        
-        # Refresh topics (optimized)
-        today = date.today().strftime("%Y-%m-%d")
-        for topic in all_topics:
-            refresh_topic_with_lock(topic, today, db)
-        
-        # Then check and send emails based on each user's schedule
+        # 直接从数据库读取新闻，不触发刷新
+        # 检查并发送邮件（根据每个用户的定时配置）
         send_daily_emails(db)
         
         logger.info("Scheduled email task completed successfully")
@@ -464,7 +446,10 @@ def send_scheduled_emails():
 
 
 def should_send_email_to_user(user: User, current_time: datetime) -> bool:
-    """检查是否应该向用户发送邮件（根据用户的定时配置，仅支持每天固定时间）"""
+    """检查是否应该向用户发送邮件（根据用户的定时配置，仅支持每天固定时间）
+    
+    使用配置的时区来比较时间，确保时区一致性。
+    """
     if not user.email_notifications or not user.email_schedule_enabled:
         return False
     
@@ -480,9 +465,22 @@ def should_send_email_to_user(user: User, current_time: datetime) -> bool:
     target_minute = user.email_schedule_minute
     
     # 检查当前时间是否匹配目标时间（允许在目标时间后的1小时内发送）
+    # 使用配置的时区来比较
     if current_time.hour == target_hour and current_time.minute >= target_minute:
-        # 如果今天还没发送过
-        if not last_sent or last_sent.date() < current_time.date():
+        # 如果今天还没发送过（使用配置时区的日期）
+        current_date = current_time.date()
+        if not last_sent:
+            return True
+        # 将 last_sent 转换为配置时区进行比较
+        tz = pytz.timezone(settings.TIMEZONE)
+        if last_sent.tzinfo is None:
+            # 如果 last_sent 是 naive datetime，假设它是 UTC
+            last_sent_tz = pytz.UTC.localize(last_sent)
+        else:
+            last_sent_tz = last_sent
+        # 转换为配置时区
+        last_sent_in_tz = last_sent_tz.astimezone(tz)
+        if last_sent_in_tz.date() < current_date:
             return True
     
     return False
@@ -510,7 +508,7 @@ def send_email_to_user(user_id: int, db: Session):
             logger.info(f"User {user.email} has no active subscriptions")
             return
         
-        today = date.today().strftime("%Y-%m-%d")
+        today = get_current_date_in_timezone()
         
         # Build email content
         email_body = build_email_digest(user, subscriptions, today, db)
@@ -518,8 +516,9 @@ def send_email_to_user(user_id: int, db: Session):
         # Send email
         send_email(user.email, f"📰 Daily Digest - {today}", email_body)
         
-        # Update last sent time
-        user.last_email_sent_at = datetime.utcnow()
+        # Update last sent time (使用配置时区的当前时间)
+        tz = pytz.timezone(settings.TIMEZONE)
+        user.last_email_sent_at = datetime.now(tz)
         db.commit()
         
         logger.info(f"Sent email to {user.email}")
@@ -530,7 +529,10 @@ def send_email_to_user(user_id: int, db: Session):
 
 
 def send_daily_emails(db: Session):
-    """检查所有用户并发送邮件（根据每个用户的定时配置）"""
+    """检查所有用户并发送邮件（根据每个用户的定时配置）
+    
+    使用配置的时区（settings.TIMEZONE）来获取当前时间，而不是服务器本地时间。
+    """
     try:
         # Get all active users with email notifications enabled
         users = db.query(User).filter(
@@ -542,7 +544,9 @@ def send_daily_emails(db: Session):
             logger.info("No users with email notifications enabled")
             return
         
-        current_time = datetime.now()
+        # 使用配置的时区获取当前时间，而不是服务器本地时间
+        tz = pytz.timezone(settings.TIMEZONE)
+        current_time = datetime.now(tz)
         sent_count = 0
         
         for user in users:
@@ -558,7 +562,7 @@ def send_daily_emails(db: Session):
                 logger.error(f"Failed to process email for user {user.email}: {str(e)}")
         
         # Log completion
-        today = date.today().strftime("%Y-%m-%d")
+        today = get_current_date_in_timezone()
         log = SystemLog(
             log_type="email",
             message=f"Processed scheduled emails, sent to {sent_count} users",
