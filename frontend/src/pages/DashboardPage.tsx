@@ -469,7 +469,6 @@ export default function DashboardPage() {
                                 {ragEnabled && (
                                   <SimilarNews 
                                     newsId={item.id}
-                                    newsTitle={item.title}
                                     onNewsClick={(newsId) => handleNewsClick({ id: newsId } as NewsItem)}
                                   />
                                 )}
