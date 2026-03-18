@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { newsAPI } from '@/lib/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ExternalLink, Sparkles, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -17,11 +16,10 @@ interface SimilarNewsItem {
 
 interface SimilarNewsProps {
   newsId: number;
-  newsTitle?: string;
   onNewsClick?: (newsId: number) => void;
 }
 
-export function SimilarNews({ newsId, newsTitle, onNewsClick }: SimilarNewsProps) {
+export function SimilarNews({ newsId, onNewsClick }: SimilarNewsProps) {
   const [similarNews, setSimilarNews] = useState<SimilarNewsItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
