@@ -183,6 +183,22 @@ export const newsAPI = {
   refresh: () => api.post('/api/news/refresh'),
   
   getRefreshStatus: () => api.get('/api/news/refresh-status'),
+  
+  // RAG相关API
+  // 获取相似新闻推荐
+  getSimilarNews: (newsId: number, limit: number = 5) =>
+    api.get(`/api/news/similar/${newsId}`, { params: { limit } }),
+  
+  // 获取个性化推荐新闻
+  getPersonalizedRecommendations: (limit: number = 10) =>
+    api.get('/api/news/recommendations/personalized', { params: { limit } }),
+  
+  // 混合搜索新闻
+  hybridSearch: (query: string, limit: number = 10) =>
+    api.get('/api/news/search/hybrid', { params: { query, limit } }),
+  
+  // 获取RAG系统状态
+  getRagStatus: () => api.get('/api/news/rag/status'),
 };
 
 export default api;

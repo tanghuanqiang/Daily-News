@@ -33,3 +33,11 @@ resend==0.7.0
 alembic==1.13.1
 psycopg2-binary==2.9.9  # PostgreSQL driver (required if using PostgreSQL)
 psycopg2-binary==2.9.9  # PostgreSQL driver (required if using PostgreSQL)
+
+# RAG - Vector Database & Embeddings
+chromadb==0.4.22  # Vector database for similarity search
+langchain==0.1.0  # LLM framework for RAG
+langchain-community==0.0.10  # Community integrations for LangChain
+sentence-transformers==2.2.2  # Chinese text embedding model (text2vec-base-chinese)
+tiktoken==0.5.2  # Tokenizer for text chunking
+numpy==1.24.3  # Vector operations

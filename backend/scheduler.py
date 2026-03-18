@@ -720,6 +720,220 @@ def send_email(to_email: str, subject: str, html_body: str):
         raise ValueError(error_msg)
 
 
+# RAG Vector Indexing Tasks
+try:
+    from rag.vector_store import get_vector_store
+    from rag.embedding_service import get_embedding_service
+    from models import VectorIndexStatus
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    logging.warning("RAG modules not available. Vector indexing disabled.")
+
+
+def index_news_to_vector_db(db: Session, max_articles: int = 100):
+    """
+    Build vector index for news articles that haven't been indexed yet
+    
+    Args:
+        db: Database session
+        max_articles: Maximum number of articles to index in one run
+    
+    Returns:
+        dict: {"indexed": int, "failed": int, "errors": List[str]}
+    """
+    if not RAG_AVAILABLE:
+        logger.warning("RAG not available, skipping vector indexing")
+        return {"indexed": 0, "failed": 0, "errors": ["RAG not available"]}
+    
+    try:
+        # Initialize services
+        vector_store = get_vector_store()
+        embedding_service = get_embedding_service()
+        
+        if not vector_store.is_available or not embedding_service.is_available:
+            logger.warning("Vector store or embedding service not available")
+            return {"indexed": 0, "failed": 0, "errors": ["Service not available"]}
+        
+        # Get news articles that haven't been indexed yet
+        unindexed_news = db.query(NewsCache).outerjoin(
+            VectorIndexStatus,
+            NewsCache.id == VectorIndexStatus.news_id
+        ).filter(
+            or_(
+                VectorIndexStatus.id.is_(None),
+                VectorIndexStatus.is_indexed == False
+            )
+        ).order_by(NewsCache.fetched_at.desc()).limit(max_articles).all()
+        
+        if not unindexed_news:
+            logger.debug("No unindexed news found")
+            return {"indexed": 0, "failed": 0, "errors": []}
+        
+        logger.info(f"Found {len(unindexed_news)} unindexed news articles")
+        
+        indexed_count = 0
+        failed_count = 0
+        errors = []
+        
+        # Process articles in batches
+        batch_size = 10
+        for i in range(0, len(unindexed_news), batch_size):
+            batch = unindexed_news[i:i + batch_size]
+            
+            # Prepare texts for batch embedding
+            texts = []
+            for news in batch:
+                combined_text = f"{news.title} {news.summary}"[:1000]
+                texts.append(combined_text)
+            
+            # Generate embeddings in batch
+            embeddings = embedding_service.generate_embeddings_batch(texts)
+            
+            # Index each article
+            for j, news in enumerate(batch):
+                try:
+                    embedding = embeddings[j]
+                    if not embedding:
+                        raise Exception("Failed to generate embedding")
+                    
+                    # Add to vector store
+                    success = vector_store.add_news(
+                        news_id=str(news.id),
+                        title=news.title,
+                        content=news.summary,
+                        embedding=embedding,
+                        metadata={
+                            "topic": news.topic,
+                            "source": news.source,
+                            "published_at": news.published_at.isoformat() if news.published_at else None,
+                            "fetched_at": news.fetched_at.isoformat() if news.fetched_at else None
+                        }
+                    )
+                    
+                    if success:
+                        # Update or create index status
+                        index_status = db.query(VectorIndexStatus).filter(
+                            VectorIndexStatus.news_id == news.id
+                        ).first()
+                        
+                        if not index_status:
+                            index_status = VectorIndexStatus(
+                                news_id=news.id,
+                                is_indexed=True,
+                                indexed_at=datetime.utcnow(),
+                                embedding_version=embedding_service.model_name,
+                                index_attempts=1
+                            )
+                            db.add(index_status)
+                        else:
+                            index_status.is_indexed = True
+                            index_status.indexed_at = datetime.utcnow()
+                            index_status.embedding_version = embedding_service.model_name
+                            index_status.index_attempts = (index_status.index_attempts or 0) + 1
+                            index_status.last_error = None
+                        
+                        indexed_count += 1
+                        logger.debug(f"Successfully indexed news: {news.title[:50]}...")
+                    else:
+                        failed_count += 1
+                        errors.append(f"Failed to add news {news.id} to vector store")
+                        
+                except Exception as e:
+                    failed_count += 1
+                    error_msg = f"Failed to index news {news.id}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                    
+                    # Update index status with error
+                    index_status = db.query(VectorIndexStatus).filter(
+                        VectorIndexStatus.news_id == news.id
+                    ).first()
+                    
+                    if index_status:
+                        index_status.index_attempts = (index_status.index_attempts or 0) + 1
+                        index_status.last_error = str(e)
+                    else:
+                        index_status = VectorIndexStatus(
+                            news_id=news.id,
+                            is_indexed=False,
+                            index_attempts=1,
+                            last_error=str(e)
+                        )
+                        db.add(index_status)
+            
+            # Commit batch
+            db.commit()
+            logger.info(f"Indexed batch {i//batch_size + 1}/{(len(unindexed_news)-1)//batch_size + 1}")
+        
+        logger.info(f"Vector indexing completed: {indexed_count} indexed, {failed_count} failed")
+        
+        return {
+            "indexed": indexed_count,
+            "failed": failed_count,
+            "errors": errors
+        }
+        
+    except Exception as e:
+        logger.error(f"Vector indexing task failed: {str(e)}")
+        db.rollback()
+        return {"indexed": 0, "failed": 0, "errors": [str(e)]}
+
+
+def cleanup_old_vector_indexes(db: Session, days_to_keep: int = 30):
+    """
+    Clean up vector indexes for news older than specified days
+    
+    Args:
+        db: Database session
+        days_to_keep: Keep vectors for news from last N days
+    
+    Returns:
+        dict: {"deleted": int, "errors": List[str]}
+    """
+    if not RAG_AVAILABLE:
+        logger.warning("RAG not available, skipping cleanup")
+        return {"deleted": 0, "errors": ["RAG not available"]}
+    
+    try:
+        vector_store = get_vector_store()
+        if not vector_store.is_available:
+            logger.warning("Vector store not available")
+            return {"deleted": 0, "errors": ["Vector store not available"]}
+        
+        # Clean up old vectors from vector store
+        deleted_count = vector_store.delete_old_news(days_to_keep=days_to_keep)
+        
+        # Clean up old index status records
+        cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
+        old_status_records = db.query(VectorIndexStatus).join(
+            NewsCache,
+            VectorIndexStatus.news_id == NewsCache.id
+        ).filter(
+            NewsCache.fetched_at < cutoff_date
+        ).all()
+        
+        status_deleted = 0
+        for status in old_status_records:
+            db.delete(status)
+            status_deleted += 1
+        
+        db.commit()
+        
+        logger.info(f"Cleaned up {deleted_count} vectors and {status_deleted} status records")
+        
+        return {
+            "deleted": deleted_count,
+            "status_records_deleted": status_deleted,
+            "errors": []
+        }
+        
+    except Exception as e:
+        logger.error(f"Vector cleanup failed: {str(e)}")
+        db.rollback()
+        return {"deleted": 0, "errors": [str(e)]}
+
+
 def start_scheduler():
     """Start the background scheduler - checks user schedules every hour"""
     try:
@@ -747,10 +961,36 @@ def start_scheduler():
             replace_existing=True
         )
         
+        # RAG vector indexing (every 2 hours)
+        if RAG_AVAILABLE:
+            scheduler.add_job(
+                lambda: index_news_to_vector_db(SessionLocal()),
+                IntervalTrigger(
+                    hours=2,
+                    timezone=settings.TIMEZONE
+                ),
+                id='rag_vector_indexing',
+                replace_existing=True
+            )
+            
+            # RAG cleanup (daily at 3 AM)
+            scheduler.add_job(
+                lambda: cleanup_old_vector_indexes(SessionLocal()),
+                CronTrigger(
+                    hour=3,
+                    minute=0,
+                    timezone=settings.TIMEZONE
+                ),
+                id='rag_cleanup',
+                replace_existing=True
+            )
+            
+            logger.info("RAG vector indexing and cleanup tasks scheduled")
+        
         scheduler.start()
         logger.info(
             f"Scheduler started (optimized) - News update at {settings.DAILY_UPDATE_HOUR}:{settings.DAILY_UPDATE_MINUTE:02d}, "
-            f"Email check every hour ({settings.TIMEZONE})"
+            f"Email check every hour, Vector indexing every 2 hours ({settings.TIMEZONE})"
         )
         
     except Exception as e:

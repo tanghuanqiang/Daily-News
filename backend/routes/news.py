@@ -19,6 +19,15 @@ from auth import get_current_active_user
 from scheduler import refresh_topic_with_lock, can_refresh_topic, get_or_create_refresh_status
 import logging
 
+# RAG Integration
+try:
+    from rag.retrieval_service import get_retrieval_service
+    from rag.vector_store import get_vector_store
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    logging.warning("RAG modules not available")
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/news", tags=["News"])
@@ -350,3 +359,397 @@ async def get_news_stats(
         "date": today,
         "stats": [{"topic": topic, "count": count} for topic, count in stats]
     }
+
+
+# RAG API Endpoints
+@router.get("/similar/{news_id}")
+async def get_similar_news(
+    news_id: int,
+    top_k: int = 5,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get similar news articles for a given news ID
+    
+    Args:
+        news_id: ID of the news article
+        top_k: Number of similar articles to return
+    
+    Returns:
+        List of similar news articles with similarity scores
+    """
+    if not RAG_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="RAG service not available"
+        )
+    
+    try:
+        # Get the news article
+        news = db.query(NewsCache).filter(NewsCache.id == news_id).first()
+        if not news:
+            raise HTTPException(
+                status_code=404,
+                detail="News article not found"
+            )
+        
+        # Get retrieval service
+        retrieval_service = get_retrieval_service()
+        if not retrieval_service.is_available:
+            raise HTTPException(
+                status_code=503,
+                detail="Retrieval service not available"
+            )
+        
+        # Find similar news
+        similar_news = retrieval_service.find_similar_to_news(
+            news_id=str(news_id),
+            title=news.title,
+            content=news.summary,
+            top_k=top_k,
+            min_similarity=0.4
+        )
+        
+        # Extract news IDs from similar results
+        similar_news_ids = []
+        for item in similar_news:
+            doc_id = item.get("id", "")
+            if doc_id.startswith("news_"):
+                # Extract news ID from document ID
+                try:
+                    target_news_id = int(doc_id.split("_")[1])
+                    similar_news_ids.append(target_news_id)
+                except:
+                    continue
+        
+        # Fetch full news data for similar articles
+        if similar_news_ids:
+            similar_articles = db.query(NewsCache).filter(
+                NewsCache.id.in_(similar_news_ids)
+            ).all()
+            
+            # Build response with similarity scores
+            result = []
+            for article in similar_articles:
+                # Find matching similarity score
+                similarity_score = 0.0
+                for sim_item in similar_news:
+                    doc_id = sim_item.get("id", "")
+                    if doc_id.startswith(f"news_{article.id}_"):
+                        similarity_score = sim_item.get("score", 0.0)
+                        break
+                
+                result.append({
+                    "id": article.id,
+                    "title": article.title,
+                    "summary": article.summary,
+                    "summary_roast": article.summary_roast,
+                    "url": article.url,
+                    "source": article.source,
+                    "image_url": article.image_url,
+                    "published_at": article.published_at.isoformat() if article.published_at else None,
+                    "similarity_score": similarity_score
+                })
+            
+            return {
+                "news_id": news_id,
+                "original_title": news.title,
+                "similar_articles": result,
+                "count": len(result)
+            }
+        else:
+            return {
+                "news_id": news_id,
+                "original_title": news.title,
+                "similar_articles": [],
+                "count": 0,
+                "message": "No similar articles found"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get similar news: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve similar news: {str(e)}"
+        )
+
+
+@router.get("/recommendations/personalized")
+async def get_personalized_recommendations(
+    limit: int = 10,
+    topic: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get personalized news recommendations based on user's reading history
+    
+    Args:
+        limit: Number of recommendations to return
+        topic: Optional topic filter
+    
+    Returns:
+        List of recommended news articles
+    """
+    if not RAG_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="RAG service not available"
+        )
+    
+    try:
+        # Get retrieval service
+        retrieval_service = get_retrieval_service()
+        if not retrieval_service.is_available:
+            raise HTTPException(
+                status_code=503,
+                detail="Retrieval service not available"
+            )
+        
+        # Get personalized recommendations
+        recommendations = retrieval_service.get_personalized_recommendations(
+            db=db,
+            user_id=current_user.id,
+            topic=topic,
+            limit=limit
+        )
+        
+        # Extract news IDs from recommendations
+        recommended_news_ids = []
+        for item in recommendations:
+            doc_id = item.get("id", "")
+            if doc_id.startswith("news_"):
+                try:
+                    target_news_id = int(doc_id.split("_")[1])
+                    recommended_news_ids.append(target_news_id)
+                except:
+                    continue
+        
+        # Fetch full news data
+        if recommended_news_ids:
+            articles = db.query(NewsCache).filter(
+                NewsCache.id.in_(recommended_news_ids)
+            ).all()
+            
+            # Build response
+            result = []
+            for article in articles:
+                # Find matching recommendation score
+                rec_score = 0.0
+                for rec_item in recommendations:
+                    doc_id = rec_item.get("id", "")
+                    if doc_id.startswith(f"news_{article.id}_"):
+                        rec_score = rec_item.get("score", 0.0)
+                        break
+                
+                result.append({
+                    "id": article.id,
+                    "title": article.title,
+                    "summary": article.summary,
+                    "summary_roast": article.summary_roast,
+                    "url": article.url,
+                    "source": article.source,
+                    "image_url": article.image_url,
+                    "published_at": article.published_at.isoformat() if article.published_at else None,
+                    "topic": article.topic,
+                    "recommendation_score": rec_score
+                })
+            
+            return {
+                "user_id": current_user.id,
+                "recommendations": result,
+                "count": len(result),
+                "topic": topic
+            }
+        else:
+            return {
+                "user_id": current_user.id,
+                "recommendations": [],
+                "count": 0,
+                "topic": topic,
+                "message": "No recommendations found. Try reading more news to build your interest profile."
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get personalized recommendations: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate recommendations: {str(e)}"
+        )
+
+
+@router.get("/search/hybrid")
+async def hybrid_search_news(
+    query: str,
+    topic: Optional[str] = None,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Hybrid search combining vector similarity and time-based scoring
+    
+    Args:
+        query: Search query text
+        topic: Optional topic filter
+        limit: Number of results
+    
+    Returns:
+        Ranked list of news articles
+    """
+    if not RAG_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="RAG service not available"
+        )
+    
+    if not query or not query.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Search query cannot be empty"
+        )
+    
+    try:
+        # Get retrieval service
+        retrieval_service = get_retrieval_service()
+        if not retrieval_service.is_available:
+            raise HTTPException(
+                status_code=503,
+                detail="Retrieval service not available"
+            )
+        
+        # Perform hybrid search
+        search_results = retrieval_service.hybrid_search(
+            query_text=query,
+            db=db,
+            topic=topic,
+            limit=limit,
+            time_weight=0.3,
+            similarity_weight=0.7
+        )
+        
+        # Extract news IDs from search results
+        search_news_ids = []
+        for item in search_results:
+            doc_id = item.get("id", "")
+            if doc_id.startswith("news_"):
+                try:
+                    target_news_id = int(doc_id.split("_")[1])
+                    search_news_ids.append(target_news_id)
+                except:
+                    continue
+        
+        # Fetch full news data
+        if search_news_ids:
+            articles = db.query(NewsCache).filter(
+                NewsCache.id.in_(search_news_ids)
+            ).all()
+            
+            # Build response with hybrid scores
+            result = []
+            for article in articles:
+                # Find matching search result
+                hybrid_score = 0.0
+                similarity_score = 0.0
+                time_score = 0.0
+                
+                for search_item in search_results:
+                    doc_id = search_item.get("id", "")
+                    if doc_id.startswith(f"news_{article.id}_"):
+                        hybrid_score = search_item.get("hybrid_score", 0.0)
+                        similarity_score = search_item.get("similarity_score", 0.0)
+                        time_score = search_item.get("time_score", 0.0)
+                        break
+                
+                result.append({
+                    "id": article.id,
+                    "title": article.title,
+                    "summary": article.summary,
+                    "summary_roast": article.summary_roast,
+                    "url": article.url,
+                    "source": article.source,
+                    "image_url": article.image_url,
+                    "published_at": article.published_at.isoformat() if article.published_at else None,
+                    "topic": article.topic,
+                    "hybrid_score": hybrid_score,
+                    "similarity_score": similarity_score,
+                    "time_score": time_score
+                })
+            
+            # Sort by hybrid score (already sorted but just in case)
+            result.sort(key=lambda x: x["hybrid_score"], reverse=True)
+            
+            return {
+                "query": query,
+                "topic": topic,
+                "results": result,
+                "count": len(result)
+            }
+        else:
+            return {
+                "query": query,
+                "topic": topic,
+                "results": [],
+                "count": 0,
+                "message": "No search results found"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Hybrid search failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Search failed: {str(e)}"
+        )
+
+
+@router.get("/rag/status")
+async def get_rag_status(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get RAG system status and statistics
+    
+    Returns:
+        RAG system availability and statistics
+    """
+    if not RAG_AVAILABLE:
+        return {
+            "available": False,
+            "message": "RAG modules not installed"
+        }
+    
+    try:
+        # Get vector store stats
+        vector_store = get_vector_store()
+        vector_stats = vector_store.get_stats()
+        
+        # Get retrieval service status
+        retrieval_service = get_retrieval_service()
+        
+        return {
+            "available": True,
+            "vector_store": {
+                "is_available": vector_store.is_available,
+                "document_count": vector_stats.get("document_count", 0),
+                "storage_size": vector_stats.get("storage_size", 0),
+                "persist_directory": vector_stats.get("persist_directory", "")
+            },
+            "retrieval_service": {
+                "is_available": retrieval_service.is_available
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get RAG status: {str(e)}")
+        return {
+            "available": False,
+            "error": str(e)
+        }
+

@@ -27,6 +27,7 @@ Daily Digest Agent 是一个智能新闻摘要应用，通过AI技术自动抓�
 - 📧 **邮件推送**：可配置的定时邮件推送，支持每日、每周或自定义间隔
 - 🎨 **精美界面**：基于 shadcn/ui 的现代化 UI，支持深色模式
 - 📱 **移动端优化**：完美适配桌面和移动设备，响应式设计
+- 🔍 **RAG智能推荐**：基于向量数据库的相似新闻推荐和个性化内容发现（NEW!）
 
 ## 🏗️ 系统架构
 
@@ -71,11 +72,18 @@ backend/
 ├── auth.py              # 用户认证逻辑（密码哈希、JWT生成）
 ├── news_fetcher.py      # 新闻抓取模块（GNews/NewsData/RSS）
 ├── summarizer.py        # LLM摘要生成模块（多提供商支持）
-├── scheduler.py         # 定时任务调度器（邮件推送、防重复刷新）
+├── scheduler.py         # 定时任务调度器（邮件推送、防重复刷新、RAG向量索引）
+├── rag/                 # RAG模块（向量检索增强生成）
+│   ├── vector_store.py      # ChromaDB向量数据库封装
+│   ├── embedding_service.py # text2vec-base-chinese嵌入模型
+│   ├── retrieval_service.py # 相似新闻检索服务
+│   └── knowledge_enhancer.py # 知识增强（Prompt注入）
+├── services/            # 业务服务模块
+│   └── user_profile_service.py # 用户画像构建和个性化推荐
 └── routes/              # API路由模块
     ├── auth.py          # 认证相关API（注册/登录/重置密码）
     ├── subscriptions.py # 订阅管理API（增删改查、自定义RSS源）
-    ├── news.py          # 新闻相关API（获取/刷新摘要、阅读状态）
+    ├── news.py          # 新闻相关API（获取/刷新摘要、阅读状态、RAG推荐）
     ├── schedule.py      # 邮件调度API（配置定时推送）
     └── preferences.py   # 用户偏好设置API（排序、过滤、阅读状态）
 ```
@@ -138,13 +146,17 @@ frontend/
 │   │   └── ForgotPasswordPage.tsx # 密码重置
 │   ├── components/       # 可复用组件
 │   │   ├── ui/          # shadcn/ui组件（Button/Card/Dialog等）
+│   │   ├── rag/         # RAG相关组件
+│   │   │   ├── SimilarNews.tsx     # 相似新闻推荐
+│   │   │   ├── PersonalizedFeed.tsx # 个性化推荐
+│   │   │   └── RagStatus.tsx       # RAG状态指示
 │   │   ├── SubscriptionManager.tsx  # 订阅管理组件
 │   │   ├── ScheduleSettings.tsx     # 邮件调度设置
 │   │   └── PreferencesSettings.tsx  # 偏好设置
 │   ├── store/           # 状态管理
 │   │   └── authStore.ts # 用户认证状态（Zustand）
 │   └── lib/             # 工具函数
-│       ├── api.ts       # API客户端封装（Axios）
+│       ├── api.ts       # API客户端封装（Axios + RAG API）
 │       └── utils.ts     # 通用工具函数
 ```
 

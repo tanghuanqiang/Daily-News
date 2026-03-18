@@ -9,6 +9,7 @@ import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspape
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useToast } from '@/components/ui/use-toast';
+import { SimilarNews, PersonalizedFeed, RagStatus } from '@/components/rag';
 
 interface NewsItem {
   id: number;
@@ -46,6 +47,8 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [, setRefreshStatus] = useState<RefreshResult[]>([]);
   const [darkMode, setDarkMode] = useState(false);
+  const [ragEnabled, setRagEnabled] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const refreshToastRef = useRef<{ id: string; update: (props: any) => void; dismiss: () => void } | null>(null);
   
@@ -115,6 +118,8 @@ export default function DashboardPage() {
           if (response.data.last_global_update) {
             setLastUpdate(new Date(response.data.last_global_update));
           }
+          // 触发个性化推荐刷新
+          setRefreshTrigger(prev => prev + 1);
         } catch (error) {
           console.error('Failed to reload dashboard:', error);
         }
@@ -299,6 +304,9 @@ export default function DashboardPage() {
             </div>
             
             <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+              {/* RAG状态指示器 */}
+              <RagStatus onStatusChange={setRagEnabled} />
+              
               <Button
                 variant="ghost"
                 size="icon"
@@ -355,6 +363,17 @@ export default function DashboardPage() {
       {/* Main Content - Mobile Optimized */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-4">
+          {/* 个性化推荐区域 - RAG启用时显示 */}
+          {ragEnabled && (
+            <PersonalizedFeed 
+              refreshTrigger={refreshTrigger}
+              onNewsClick={(newsId) => {
+                // 可以添加滚动到该新闻的逻辑
+                console.log('Clicked news:', newsId);
+              }}
+            />
+          )}
+          
           {topics.length === 0 ? (
             <Card className="border-slate-200 dark:border-slate-700">
               <CardHeader>
@@ -445,6 +464,15 @@ export default function DashboardPage() {
                                     <ExternalLink className="h-3 w-3" />
                                   </a>
                                 </div>
+                                
+                                {/* 相似新闻推荐 - RAG启用时显示 */}
+                                {ragEnabled && (
+                                  <SimilarNews 
+                                    newsId={item.id}
+                                    newsTitle={item.title}
+                                    onNewsClick={(newsId) => handleNewsClick({ id: newsId } as NewsItem)}
+                                  />
+                                )}
                               </div>
                             </div>
                           </div>

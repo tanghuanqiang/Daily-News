@@ -5,6 +5,14 @@ from typing import Optional, Dict
 from database import settings
 import logging
 
+# RAG Integration
+try:
+    from rag.knowledge_enhancer import KnowledgeEnhancer, get_knowledge_enhancer
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    logging.warning("RAG modules not available. Knowledge enhancement disabled.")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -54,6 +62,22 @@ class NewsSummarizer:
                     logger.error("Failed to initialize NVIDIA client")
         else:
             self.model = "qwen-turbo"  # Low-cost model, can upgrade to "qwen-plus"
+        
+        # Initialize RAG knowledge enhancer
+        self.rag_available = RAG_AVAILABLE
+        if self.rag_available:
+            try:
+                self.knowledge_enhancer = get_knowledge_enhancer()
+                if self.knowledge_enhancer.is_available:
+                    logger.info("RAG Knowledge Enhancer initialized successfully")
+                else:
+                    logger.warning("RAG Knowledge Enhancer not available")
+                    self.rag_available = False
+            except Exception as e:
+                logger.warning(f"Failed to initialize RAG Knowledge Enhancer: {str(e)}")
+                self.rag_available = False
+        else:
+            logger.info("RAG features disabled")
     
     def _check_ollama_connection(self):
         """检查Ollama服务是否可用"""
@@ -86,7 +110,8 @@ class NewsSummarizer:
         self, 
         title: str, 
         content: str, 
-        roast_mode: bool = False
+        roast_mode: bool = False,
+        topic: Optional[str] = None
     ) -> str:
         """
         Generate a concise 1-2 sentence summary of news article
@@ -95,24 +120,25 @@ class NewsSummarizer:
             title: News title
             content: News content/description
             roast_mode: If True, generate humorous/roast-style summary
+            topic: News topic/category for RAG enhancement
         
         Returns:
             Summary string
         """
         if self.provider == "dashscope":
-            return self._generate_dashscope(title, content, roast_mode)
+            return self._generate_dashscope(title, content, roast_mode, topic)
         elif self.provider == "ollama":
-            return self._generate_ollama(title, content, roast_mode)
+            return self._generate_ollama(title, content, roast_mode, topic)
         elif self.provider == "nvidia":
-            return self._generate_nvidia(title, content, roast_mode)
+            return self._generate_nvidia(title, content, roast_mode, topic)
         else:
             logger.warning(f"Unknown LLM provider: {self.provider}, using fallback")
             return self._fallback_summary(title, content, roast_mode)
 
-    def _generate_ollama(self, title: str, content: str, roast_mode: bool) -> str:
+    def _generate_ollama(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Generate summary using local Ollama model"""
         try:
-            prompt = self._build_prompt(title, content, roast_mode)
+            prompt = self._build_prompt(title, content, roast_mode, topic)
             
             payload = {
                 "model": self.model,
@@ -165,7 +191,7 @@ class NewsSummarizer:
             logger.error(f"Ollama摘要生成错误: {str(e)}", exc_info=True)
             return self._fallback_summary(title, content, roast_mode)
 
-    def _generate_nvidia(self, title: str, content: str, roast_mode: bool) -> str:
+    def _generate_nvidia(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Generate summary using NVIDIA GLM API"""
         if not settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY == "":
             logger.warning("NVIDIA API key not configured, using fallback summary")
@@ -283,7 +309,7 @@ class NewsSummarizer:
             logger.error(f"NVIDIA GLM API error: {str(e)}", exc_info=True)
             return self._fallback_summary(title, content, roast_mode)
     
-    def _generate_dashscope(self, title: str, content: str, roast_mode: bool) -> str:
+    def _generate_dashscope(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Generate summary using DashScope (Alibaba Cloud)"""
         if not settings.DASHSCOPE_API_KEY or settings.DASHSCOPE_API_KEY == "":
             logger.warning("DashScope API key not configured, using fallback summary")
@@ -312,9 +338,34 @@ class NewsSummarizer:
             logger.error(f"Summary generation error: {str(e)}")
             return self._fallback_summary(title, content, roast_mode)
     
-    def _build_prompt(self, title: str, content: str, roast_mode: bool) -> str:
+    def _build_prompt(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Build prompt for LLM based on mode"""
         
+        # Try to use RAG enhancement if available
+        if self.rag_available and self.knowledge_enhancer.is_available:
+            try:
+                if roast_mode:
+                    enhanced_prompt = self.knowledge_enhancer.enhance_roast_prompt(
+                        title=title,
+                        content=content,
+                        topic=topic
+                    )
+                else:
+                    enhanced_prompt = self.knowledge_enhancer.enhance_summary_prompt(
+                        title=title,
+                        content=content,
+                        topic=topic
+                    )
+                
+                if enhanced_prompt and len(enhanced_prompt) > len(title):
+                    logger.debug("Using RAG-enhanced prompt")
+                    return enhanced_prompt
+                else:
+                    logger.debug("RAG enhancement returned empty, using basic prompt")
+            except Exception as e:
+                logger.warning(f"RAG enhancement failed: {str(e)}, falling back to basic prompt")
+        
+        # Fallback to basic prompt if RAG not available or failed
         if roast_mode:
             return f"""你是一个幽默风趣的新闻评论员，擅长用俏皮、搞笑、略带吐槽的语气总结新闻。
 
@@ -539,7 +590,7 @@ class NewsSummarizer:
         Batch process multiple articles
         
         Args:
-            articles: List of dicts with 'title' and 'content' keys
+            articles: List of dicts with 'title', 'content', and optional 'topic' keys
             roast_mode: Whether to use roast mode
         
         Returns:
@@ -552,7 +603,8 @@ class NewsSummarizer:
                 summary = self.generate_summary(
                     article.get("title", ""),
                     article.get("content", ""),
-                    roast_mode
+                    roast_mode,
+                    article.get("topic")  # Optional topic for RAG enhancement
                 )
                 article["summary"] = summary
                 results.append(article)

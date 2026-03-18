@@ -143,6 +143,22 @@ class UserPreference(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class VectorIndexStatus(Base):
+    """向量索引状态表 - 跟踪新闻向量索引的构建状态"""
+    __tablename__ = "vector_index_status"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    news_id = Column(Integer, ForeignKey("news_cache.id"), nullable=False, unique=True, index=True)
+    is_indexed = Column(Boolean, default=False)  # 是否已构建向量索引
+    indexed_at = Column(DateTime, nullable=True)  # 索引构建时间
+    embedding_version = Column(String, nullable=True)  # Embedding模型版本
+    vector_id = Column(String, nullable=True)  # ChromaDB中的向量ID
+    index_attempts = Column(Integer, default=0)  # 索引尝试次数
+    last_error = Column(Text, nullable=True)  # 最后一次错误信息
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # Pydantic schemas for API
 from pydantic import BaseModel
 from typing import Optional, List
