@@ -5,6 +5,7 @@ interface User {
   id: number;
   email: string;
   email_notifications: boolean;
+  is_admin: boolean;
   created_at: string;
 }
 

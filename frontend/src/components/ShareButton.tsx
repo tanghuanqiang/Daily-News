@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
-import { api } from '@/lib/api';
+import api from '@/lib/api';
 import {
   DropdownMenu,
   DropdownMenuContent,

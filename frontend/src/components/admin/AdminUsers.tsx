@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, User, Mail, Calendar } from 'lucide-react';
+import { Search, User, Calendar } from 'lucide-react';
 
 interface User {
   id: number;

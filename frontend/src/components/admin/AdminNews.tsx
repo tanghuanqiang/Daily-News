@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, FileText, Calendar, Tag } from 'lucide-react';
+import { Search, Calendar, Tag } from 'lucide-react';
 
 interface NewsArticle {
   id: number;
