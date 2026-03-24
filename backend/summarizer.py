@@ -113,20 +113,28 @@ class NewsSummarizer:
             summary = self._fallback_summary(title, content, roast_mode)
         
         # Post-process summary to ensure format compliance
-        return self._post_process_summary(summary, roast_mode)
+        processed = self._post_process_summary(summary, roast_mode)
+        
+        # If post-processing detected prompt leak and returned empty, use fallback
+        if not processed:
+            logger.warning(f"Post-processing returned empty result, using fallback for: {title[:50]}")
+            return self._fallback_summary(title, content, roast_mode)
+        
+        return processed
 
     def _generate_ollama(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Generate summary using local Ollama model"""
         try:
-            prompt = self._build_prompt(title, content, roast_mode, topic)
+            system_prompt, user_prompt = self._build_chat_prompt(title, content, roast_mode, topic)
             
             payload = {
                 "model": self.model,
                 "messages": [
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
                 ],
                 "stream": False,
-                "temperature": 0.8 if roast_mode else 0.3,
+                "temperature": 0.85 if roast_mode else 0.3,
             }
             
             response = requests.post(self.api_url, json=payload, timeout=120)
@@ -251,24 +259,30 @@ class NewsSummarizer:
             return self._fallback_summary(title, content, roast_mode)
     
     def _generate_dashscope(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
-        """Generate summary using DashScope (Alibaba Cloud)"""
+        """Generate summary using DashScope (Alibaba Cloud) - uses chat messages format"""
         if not settings.DASHSCOPE_API_KEY or settings.DASHSCOPE_API_KEY == "":
             logger.warning("DashScope API key not configured, using fallback summary")
             return self._fallback_summary(title, content, roast_mode)
         
         try:
-            prompt = self._build_prompt(title, content, roast_mode)
+            system_prompt, user_prompt = self._build_chat_prompt(title, content, roast_mode)
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
             
             response = dashscope.Generation.call(
                 model=self.model,
-                prompt=prompt,
-                max_tokens=150,
-                temperature=0.8 if roast_mode else 0.3,
-                top_p=0.9
+                messages=messages,
+                max_tokens=100,
+                temperature=0.85 if roast_mode else 0.3,
+                top_p=0.9,
+                result_format="message"
             )
             
             if response.status_code == 200:
-                summary = response.output.text.strip()
+                summary = response.output.choices[0].message.content.strip()
                 logger.info(f"Generated summary (DashScope) for: {title[:50]}...")
                 return summary
             else:
@@ -279,39 +293,71 @@ class NewsSummarizer:
             logger.error(f"Summary generation error: {str(e)}")
             return self._fallback_summary(title, content, roast_mode)
     
-    def _build_prompt(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
-        """Build prompt for LLM based on mode"""
+    def _build_chat_prompt(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None):
+        """Build (system_prompt, user_prompt) tuple for chat-format LLM calls.
+        
+        Uses few-shot examples and XML output tags to constrain the output format.
+        This is the preferred method for providers that support chat messages.
+        """
         if roast_mode:
-            return f"""任务：用1句话吐槽这条新闻
-
-要求（必须遵守）：
-1. 只输出吐槽内容，不要任何解释、说明或元信息
-2. 不要输出"分析请求"、"角色"、"任务"、"要求"等标题
-3. 不要输出编号列表（如1. 2. 3.）
-4. 不要输出markdown格式（如**粗体**、##标题）
-5. 只输出纯文本吐槽
-6. 抓住最离谱/最搞笑的槽点
-7. 使用网络流行语
-8. 不超过30字
-
-新闻标题：{title}
-新闻内容：{content}
-
-吐槽："""
+            system_prompt = (
+                "你是一个犀利的吐槽博主，专门用一句话讽刺/吐槽新闻。\n"
+                "规则：\n"
+                "1. 只输出吐槽正文，不输出任何其他内容\n"
+                "2. 不得输出标题、序号、说明、角色描述等任何元信息\n"
+                "3. 不使用 Markdown 格式（无**、无##、无列表）\n"
+                "4. 字数不超过30字\n"
+                "5. 使用网络流行语，语气犀利有趣"
+            )
+            user_prompt = (
+                "下面是几个示例，展示正确的输出格式：\n\n"
+                "示例1\n"
+                "新闻：某公司AI产品发布，宣称准确率99%\n"
+                "吐槽：那剩下1%的错误一定是专门留给用户的\n\n"
+                "示例2\n"
+                "新闻：新款手机售价万元，号称史上最贵旗舰\n"
+                "吐槽：买了手机，肾还够用吗？\n\n"
+                "示例3\n"
+                "新闻：健身房会员费又涨价，理由是器械升级\n"
+                "吐槽：器械升级了，钱包先瘦了\n\n"
+                "---\n"
+                "现在请吐槽这条新闻，只输出吐槽正文，不输出任何其他内容：\n\n"
+                f"新闻标题：{title}\n"
+                f"新闻内容：{content[:300]}"
+            )
         else:
-            return f"""你是一个专业新闻编辑，擅长写一句话摘要。
+            system_prompt = (
+                "你是一个专业新闻编辑，专门写一句话客观摘要。\n"
+                "规则：\n"
+                "1. 只输出摘要正文，不输出任何其他内容\n"
+                "2. 不输出标题、说明、序号等元信息\n"
+                "3. 客观中性，不带主观倾向\n"
+                "4. 字数不超过25字"
+            )
+            user_prompt = (
+                "下面是几个示例，展示正确的输出格式：\n\n"
+                "示例1\n"
+                "新闻标题：苹果发布iPhone 16系列，搭载A18芯片\n"
+                "摘要：苹果发布搭载A18芯片的iPhone 16，性能提升显著。\n\n"
+                "示例2\n"
+                "新闻标题：美联储宣布降息25个基点\n"
+                "摘要：美联储宣布降息25基点，为四年来首次。\n\n"
+                "---\n"
+                "现在请总结这条新闻，只输出摘要正文，不输出任何其他内容：\n\n"
+                f"新闻标题：{title}\n"
+                f"新闻内容：{content[:300]}"
+            )
+        return system_prompt, user_prompt
 
-任务：用1句话总结新闻核心
-要求：
-- 客观中性，不带倾向
-- 抓住5W1H（谁、做了什么、结果）
-- 不超过25字
-- 只输出摘要，不要其他文字
-
-新闻标题：{title}
-新闻内容：{content}
-
-摘要："""
+    def _build_prompt(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
+        """Build single-string prompt for LLM (used by Ollama which supports chat messages via _build_chat_prompt).
+        
+        Note: For providers with chat support, prefer _build_chat_prompt() instead.
+        This method is kept for backward compatibility with Ollama's single-prompt path.
+        """
+        system_prompt, user_prompt = self._build_chat_prompt(title, content, roast_mode, topic)
+        # For single-prompt mode, combine system + user into one structured prompt
+        return f"{system_prompt}\n\n{user_prompt}"
     
     def evaluate_relevance(self, topic: str, title: str, content: str) -> float:
         """
@@ -519,6 +565,12 @@ class NewsSummarizer:
         if not summary:
             return summary
         
+        # 0. Extract content from XML-style tags if present (e.g. <roast>...</roast>)
+        tag = "roast" if roast_mode else "summary"
+        tag_match = re.search(rf'<{tag}>(.*?)</{tag}>', summary, re.DOTALL)
+        if tag_match:
+            summary = tag_match.group(1).strip()
+
         # Remove common LLM meta-text patterns
         # 1. Remove quotes if the summary is wrapped in them
         summary = summary.strip()
@@ -579,7 +631,32 @@ class NewsSummarizer:
             # Remove extra whitespace and newlines
             summary = re.sub(r'\n{3,}', '\n\n', summary)
         
-        # 5. Apply length limits
+        # 5. Final strip
+        summary = summary.strip()
+        
+        # 6. Prompt leak detection — if cleaned text still looks like prompt content, it's garbage
+        # Take the first line for analysis (multi-line outputs are almost always prompt leaks)
+        first_line = summary.split('\n')[0].strip() if summary else ""
+        
+        LEAK_INDICATORS = [
+            '顶级脱口秀', '脱口秀演员', '分析用户请求', '分析请求',
+            '角色：', '角色:', '任务：', '任务:', '要求：', '要求:',
+            '新闻标题：', '新闻内容：', '只输出', '不要任何解释',
+            '你是一个', '用1句话', '擅长写', '限制条件',
+        ]
+        
+        is_leaked = any(indicator in summary for indicator in LEAK_INDICATORS)
+        # Also flag if the summary is multi-line and longer than 60 chars (likely a full prompt output)
+        is_multi_line_garbage = '\n' in summary.strip() and len(summary) > 60
+        
+        if is_leaked or is_multi_line_garbage:
+            logger.warning(
+                f"Prompt leak detected in {'roast' if roast_mode else 'normal'} summary, "
+                f"discarding. Preview: {summary[:80]!r}"
+            )
+            return ""  # Return empty — caller (_generate_*) will use fallback via generate_summary
+        
+        # 7. Apply length limits
         max_length = 30 if roast_mode else 25
         if len(summary) > max_length:
             # Try to find a good truncation point (period, comma, or ellipsis)
