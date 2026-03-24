@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, User, Calendar } from 'lucide-react';
+import { get } from '@/lib/api';
 
 interface User {
   id: number;
@@ -30,7 +31,7 @@ export default function AdminUsers() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch('/api/admin/users?limit=100');
+      const response = await get('/api/admin/users?limit=100');
       const data = await response.json();
       setUsers(data);
     } catch (error) {

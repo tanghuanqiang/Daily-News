@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Search, Calendar, Tag } from 'lucide-react';
+import { get } from '@/lib/api';
 
 interface NewsArticle {
   id: number;
@@ -28,7 +29,7 @@ export default function AdminNews() {
 
   const fetchNews = async () => {
     try {
-      const response = await fetch('/api/admin/news?limit=100');
+      const response = await get('/api/admin/news?limit=100');
       const data = await response.json();
       setNews(data);
     } catch (error) {

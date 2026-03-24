@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BarChart3, Play, Pause, RotateCcw } from 'lucide-react';
+import { get, put } from '@/lib/api';
 
 interface Experiment {
   id: number;
@@ -34,7 +35,7 @@ export default function AdminExperiments() {
       const url = statusFilter === 'all' 
         ? '/api/admin/experiments'
         : `/api/admin/experiments?status=${statusFilter}`;
-      const response = await fetch(url);
+      const response = await get(url);
       const data = await response.json();
       setExperiments(data);
     } catch (error) {
@@ -46,9 +47,7 @@ export default function AdminExperiments() {
 
   const updateExperimentStatus = async (experimentId: number, status: string) => {
     try {
-      const response = await fetch(`/api/admin/experiments/${experimentId}/status?status=${status}`, {
-        method: 'PUT'
-      });
+      const response = await put(`/api/admin/experiments/${experimentId}/status?status=${status}`);
       
       if (response.ok) {
         fetchExperiments(); // 刷新列表

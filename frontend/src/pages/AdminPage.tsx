@@ -10,6 +10,7 @@ import AdminExperiments from '@/components/admin/AdminExperiments';
 import AdminLogs from '@/components/admin/AdminLogs';
 import { useAuthStore } from '@/store/authStore';
 import { Navigate } from 'react-router-dom';
+import { get } from '@/lib/api';
 
 export default function AdminPage() {
   const { user } = useAuthStore();
@@ -108,7 +109,7 @@ function QuickStats() {
   });
 
   useEffect(() => {
-    fetch('/api/admin/overview')
+    get('/api/admin/overview')
       .then(res => res.json())
       .then(data => setStats(data))
       .catch(err => console.error('获取统计失败:', err));

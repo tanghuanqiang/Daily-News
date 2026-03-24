@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { TrendingUp, Users, Link, TestTube } from 'lucide-react';
+import { get } from '@/lib/api';
 
 export default function AdminOverview() {
   const [overviewData, setOverviewData] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/admin/overview')
+    get('/api/admin/overview')
       .then(res => res.json())
       .then(data => setOverviewData(data))
       .catch(err => console.error('获取概览数据失败:', err));

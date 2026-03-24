@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Filter, RefreshCw, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { get } from '@/lib/api';
 
 interface LogEntry {
   timestamp: string;
@@ -23,7 +24,7 @@ export default function AdminLogs() {
 
   const fetchLogs = async () => {
     try {
-      const response = await fetch('/api/admin/logs/system?lines=100');
+      const response = await get('/api/admin/logs/system?lines=100');
       const data = await response.json();
       setLogs(data);
     } catch (error) {

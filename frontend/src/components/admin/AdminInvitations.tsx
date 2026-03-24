@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Search, Link, User, Calendar, Trophy } from 'lucide-react';
+import { get } from '@/lib/api';
 
 interface Invitation {
   id: number;
@@ -41,7 +42,7 @@ export default function AdminInvitations() {
 
   const fetchInvitations = async () => {
     try {
-      const response = await fetch('/api/admin/invitations?limit=100');
+      const response = await get('/api/admin/invitations?limit=100');
       const data = await response.json();
       setInvitations(data);
     } catch (error) {
@@ -51,7 +52,7 @@ export default function AdminInvitations() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/admin/invitations/stats');
+      const response = await get('/api/admin/invitations/stats');
       const data = await response.json();
       setStats(data);
     } catch (error) {
