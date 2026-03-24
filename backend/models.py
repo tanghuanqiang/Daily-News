@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint, Float, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -9,9 +9,12 @@ class User(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, unique=True, index=True, nullable=True)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+    email_verified = Column(Boolean, default=False)
     email_notifications = Column(Boolean, default=True)
     
     # 用户级别的邮件定时配置
@@ -143,6 +146,74 @@ class UserPreference(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class NewsFeedback(Base):
+    """新闻反馈表 - 存储用户对新闻摘要的反馈"""
+    __tablename__ = "news_feedback"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    news_id = Column(Integer, ForeignKey("news_cache.id"), nullable=False, index=True)
+    feedback_type = Column(String(20), nullable=False)  # 'like', 'dislike', 'share'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 唯一约束：每个用户对每条新闻的每种反馈类型只能有一条记录
+    __table_args__ = (
+        UniqueConstraint('user_id', 'news_id', 'feedback_type', name='uq_user_news_feedback'),
+    )
+
+
+class UserActivityLog(Base):
+    """用户行为日志表 - 追踪用户活跃时间用于推送优化"""
+    __tablename__ = "user_activity_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    activity_type = Column(String(50), nullable=False, index=True)  # login, read, share, feedback, email_open
+    activity_time = Column(DateTime, default=datetime.utcnow, index=True)
+    hour_of_day = Column(Integer, nullable=False, index=True)  # 0-23, 用于快速分析
+    day_of_week = Column(Integer, nullable=False, index=True)  # 0-6 (周一到周日)
+    extra_data = Column(JSON, default=dict)  # 额外信息（如新闻ID、分享平台等）
+    
+    # 索引优化
+    __table_args__ = (
+        Index('idx_user_activity_time', 'user_id', 'activity_time'),
+        Index('idx_user_activity_type_hour', 'user_id', 'activity_type', 'hour_of_day'),
+    )
+
+
+class AchievementDefinition(Base):
+    """成就定义表 - 定义所有可用的成就"""
+    __tablename__ = "achievement_definitions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False)  # 唯一标识，如 'first_read', '7_days_streak'
+    name = Column(String(100), nullable=False)  # 成就名称，如 "连续阅读7天"
+    description = Column(Text, nullable=False)  # 成就描述
+    icon = Column(String(50), nullable=True)  # 图标（emoji或图标名称）
+    category = Column(String(50), nullable=True)  # 类别：'reading', 'exploration', 'early_bird', 'sharing'
+    requirement_config = Column(JSON, default=dict)  # 解锁条件配置，如 {'days': 7, 'count': 10}
+    points = Column(Integer, default=0)  # 成就点数
+    is_active = Column(Boolean, default=True)  # 是否启用
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UserAchievement(Base):
+    """用户成就表 - 记录用户获得的成就"""
+    __tablename__ = "user_achievements"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    achievement_id = Column(Integer, ForeignKey("achievement_definitions.id"), nullable=False, index=True)
+    unlocked_at = Column(DateTime, default=datetime.utcnow)
+    progress_data = Column(JSON, default=dict)  # 解锁时的进度数据快照
+    
+    # 唯一约束：每个用户只能获得每个成就一次
+    __table_args__ = (
+        UniqueConstraint('user_id', 'achievement_id', name='uq_user_achievement'),
+    )
+
+
 class VectorIndexStatus(Base):
     """向量索引状态表 - 跟踪新闻向量索引的构建状态"""
     __tablename__ = "vector_index_status"
@@ -157,6 +228,137 @@ class VectorIndexStatus(Base):
     last_error = Column(Text, nullable=True)  # 最后一次错误信息
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Experiment(Base):
+    """实验配置表 - 定义A/B测试实验"""
+    __tablename__ = "experiments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, index=True)  # 实验名称（唯一）
+    description = Column(Text, nullable=True)  # 实验描述
+    status = Column(String(20), default="draft")  # 状态: draft, running, paused, completed
+    traffic_allocation = Column(Float, default=1.0)  # 流量分配（0-1，占总流量的比例）
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)  # 创建者ID
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)  # 实验开始时间
+    completed_at = Column(DateTime, nullable=True)  # 实验完成时间
+    
+    # 唯一约束：实验名称唯一
+    __table_args__ = (
+        UniqueConstraint('name', name='uq_experiment_name'),
+    )
+
+
+class ExperimentVariant(Base):
+    """实验版本表 - 存储实验的不同版本配置"""
+    __tablename__ = "experiment_variants"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False, index=True)
+    name = Column(String(50), nullable=False)  # 版本名称（如 "control", "treatment"）
+    description = Column(Text, nullable=True)  # 版本描述
+    traffic_weight = Column(Float, nullable=False)  # 流量权重（该版本占总实验流量的比例）
+    config = Column(JSON, default=dict)  # 版本配置（JSON格式，包含UI、文案等）
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 唯一约束：同一实验下版本名称唯一
+    __table_args__ = (
+        UniqueConstraint('experiment_id', 'name', name='uq_experiment_variant'),
+    )
+
+
+class UserExperimentAssignment(Base):
+    """用户实验分配表 - 记录用户被分配到哪个实验版本"""
+    __tablename__ = "user_experiment_assignments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False, index=True)
+    variant_id = Column(Integer, ForeignKey("experiment_variants.id"), nullable=False, index=True)
+    assigned_at = Column(DateTime, default=datetime.utcnow)  # 分配时间
+    
+    # 唯一约束：同一用户在同一实验中只能分配到一个版本
+    __table_args__ = (
+        UniqueConstraint('user_id', 'experiment_id', name='uq_user_experiment_assignment'),
+    )
+
+
+class ExperimentResult(Base):
+    """实验结果表 - 存储实验的统计结果"""
+    __tablename__ = "experiment_results"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False, index=True)
+    variant_id = Column(Integer, ForeignKey("experiment_variants.id"), nullable=False, index=True)
+    metric_name = Column(String(50), nullable=False, index=True)  # 指标名称（如 "click_rate", "conversion_rate"）
+    metric_value = Column(Float, nullable=False)  # 指标值
+    sample_size = Column(Integer, default=0)  # 样本量
+    calculated_at = Column(DateTime, default=datetime.utcnow)  # 计算时间
+    
+    # 索引优化
+    __table_args__ = (
+        Index('idx_experiment_metric', 'experiment_id', 'metric_name'),
+        Index('idx_variant_metric', 'variant_id', 'metric_name'),
+    )
+
+
+class ExperimentEvent(Base):
+    """实验事件表 - 记录用户在实验中的行为事件"""
+    __tablename__ = "experiment_events"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False, index=True)
+    variant_id = Column(Integer, ForeignKey("experiment_variants.id"), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False, index=True)  # 事件类型（如 "view", "click", "conversion"）
+    event_data = Column(JSON, default=dict)  # 事件数据
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 索引优化
+    __table_args__ = (
+        Index('idx_user_experiment_event', 'user_id', 'experiment_id', 'event_type'),
+        Index('idx_variant_event', 'variant_id', 'event_type'),
+    )
+
+
+class InvitationCode(Base):
+    """邀请码表 - 存储邀请码和邀请关系"""
+    __tablename__ = "invitation_codes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(20), unique=True, nullable=False, index=True)  # 邀请码（6-8位字符）
+    generated_by = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)  # 创建用户ID
+    is_used = Column(Boolean, default=False)  # 是否已被使用
+    used_by = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # 使用用户ID（注册时）
+    created_at = Column(DateTime, default=datetime.utcnow)
+    used_at = Column(DateTime, nullable=True)  # 使用时间
+    
+    # 唯一约束：每个邀请码唯一
+    __table_args__ = (
+        UniqueConstraint('code', name='uq_invitation_code'),
+    )
+
+
+class UserInvitationStats(Base):
+    """用户邀请统计表 - 记录用户的邀请统计数据"""
+    __tablename__ = "user_invitation_stats"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)  # 用户ID
+    total_invited = Column(Integer, default=0)  # 总邀请人数（生成的邀请码数量）
+    successful_invites = Column(Integer, default=0)  # 成功邀请数（被使用的邀请码数量）
+    total_points_earned = Column(Integer, default=0)  # 获得的总成就点数
+    last_invited_at = Column(DateTime, nullable=True)  # 最后邀请时间
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 唯一约束：每个用户只有一条统计记录
+    __table_args__ = (
+        UniqueConstraint('user_id', name='uq_user_invitation_stats'),
+    )
 
 
 # Pydantic schemas for API
@@ -272,6 +474,209 @@ class CustomRSSFeedResponse(BaseModel):
     is_active: bool
     roast_mode: bool
     created_at: dt
+    
+    class Config:
+        from_attributes = True
+
+
+# P1: 反馈、分享和成就相关的Pydantic schemas
+class NewsFeedbackCreate(BaseModel):
+    news_id: int
+    feedback_type: str  # 'like', 'dislike', 'share'
+
+
+class NewsFeedbackResponse(BaseModel):
+    id: int
+    user_id: int
+    news_id: int
+    feedback_type: str
+    created_at: dt
+    
+    class Config:
+        from_attributes = True
+
+
+class AchievementDefinitionCreate(BaseModel):
+    code: str
+    name: str
+    description: str
+    icon: Optional[str] = None
+    category: Optional[str] = None
+    requirement_config: dict = {}
+    points: int = 0
+
+
+class AchievementDefinitionResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: str
+    icon: Optional[str]
+    category: Optional[str]
+    requirement_config: dict
+    points: int
+    is_active: bool
+    
+    class Config:
+        from_attributes = True
+
+
+class UserAchievementResponse(BaseModel):
+    id: int
+    user_id: int
+    achievement_id: int
+    unlocked_at: dt
+    progress_data: dict
+    
+    class Config:
+        from_attributes = True
+
+
+class AchievementWithProgress(BaseModel):
+    achievement: AchievementDefinitionResponse
+    is_unlocked: bool
+    unlocked_at: Optional[dt] = None
+    progress: float  # 0.0 - 1.0
+    current_value: int
+    requirement_value: int
+    
+    class Config:
+        from_attributes = True
+
+
+class ShareTemplateResponse(BaseModel):
+    text: str
+    url: str
+    platform: str
+    
+    class Config:
+        from_attributes = True
+
+
+# P2: 邀请系统相关的Pydantic schemas
+class InvitationCodeResponse(BaseModel):
+    id: int
+    code: str
+    generated_by: int
+    is_used: bool
+    used_by: Optional[int]
+    created_at: dt
+    used_at: Optional[dt]
+    
+    class Config:
+        from_attributes = True
+
+
+class InvitationStatsResponse(BaseModel):
+    total_invited: int
+    successful_invites: int
+    total_points_earned: int
+    last_invited_at: Optional[dt]
+    invite_success_rate: float  # 邀请成功率（百分比）
+    
+    class Config:
+        from_attributes = True
+
+
+class InvitationRewardResponse(BaseModel):
+    invitation_code: str
+    inviter_points: int  # 邀请人获得的点数
+    invitee_points: int  # 被邀请人获得的点数
+    message: str
+    
+    class Config:
+        from_attributes = True
+
+
+class InviteClaimRequest(BaseModel):
+    invitation_code: str
+    
+    class Config:
+        from_attributes = True
+
+
+# P2: A/B测试平台相关的Pydantic schemas
+class ExperimentCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    traffic_allocation: float = 1.0
+
+
+class ExperimentResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    status: str
+    traffic_allocation: float
+    created_by: int
+    created_at: dt
+    updated_at: dt
+    started_at: Optional[dt]
+    completed_at: Optional[dt]
+    
+    class Config:
+        from_attributes = True
+
+
+class ExperimentVariantCreate(BaseModel):
+    experiment_id: int
+    name: str
+    description: Optional[str] = None
+    traffic_weight: float
+    config: dict = {}
+
+
+class ExperimentVariantResponse(BaseModel):
+    id: int
+    experiment_id: int
+    name: str
+    description: Optional[str]
+    traffic_weight: float
+    config: dict
+    created_at: dt
+    updated_at: dt
+    
+    class Config:
+        from_attributes = True
+
+
+class ExperimentAssignmentResponse(BaseModel):
+    user_id: int
+    experiment_id: int
+    variant_id: int
+    variant_name: str
+    variant_config: dict
+    assigned_at: dt
+    
+    class Config:
+        from_attributes = True
+
+
+class ExperimentEventCreate(BaseModel):
+    experiment_id: int
+    event_type: str
+    event_data: dict = {}
+
+
+class ExperimentResultResponse(BaseModel):
+    experiment_id: int
+    variant_id: int
+    variant_name: str
+    metric_name: str
+    metric_value: float
+    sample_size: int
+    calculated_at: dt
+    
+    class Config:
+        from_attributes = True
+
+
+class ExperimentReport(BaseModel):
+    experiment: ExperimentResponse
+    variants: List[ExperimentVariantResponse]
+    results: List[ExperimentResultResponse]
+    total_users: int
+    significance: Optional[float]  # p-value
     
     class Config:
         from_attributes = True

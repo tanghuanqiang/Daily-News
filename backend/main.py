@@ -2,7 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import engine, Base, settings
-from routes import auth_router, subscriptions_router, news_router
+from routes import (
+    auth_router,
+    subscriptions_router,
+    news_router,
+    feedback_router,
+    sharing_router,
+    achievements_router,
+    experiments_router,
+    invitations_router,
+    admin_router
+)
 from routes.schedule import router as schedule_router
 from routes.preferences import router as preferences_router
 from scheduler import start_scheduler, stop_scheduler
@@ -56,6 +66,12 @@ app.include_router(subscriptions_router)
 app.include_router(news_router)
 app.include_router(schedule_router)
 app.include_router(preferences_router)
+app.include_router(feedback_router)
+app.include_router(sharing_router)
+app.include_router(achievements_router)
+app.include_router(experiments_router)
+app.include_router(invitations_router)
+app.include_router(admin_router)
 
 
 @app.get("/")

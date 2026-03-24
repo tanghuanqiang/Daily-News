@@ -5,6 +5,7 @@ from datetime import datetime
 from database import get_db
 from models import User, UserPreference, UserPreferenceResponse, UserPreferenceUpdate, NewsCache, UserNewsInteraction
 from auth import get_current_active_user
+from services.achievement_service import check_and_unlock_achievements
 import logging
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,17 @@ async def mark_news_read(
             interaction.is_read = True
             interaction.read_at = datetime.utcnow()
             db.commit()
+            
+            # 成就检测 - 阅读相关成就
+            try:
+                check_and_unlock_achievements(
+                    user_id=current_user.id,
+                    trigger_type='read',
+                    news_id=news_id,
+                    db=db
+                )
+            except Exception as e:
+                logger.error(f"成就检测失败: {str(e)}")
     else:
         interaction = UserNewsInteraction(
             user_id=current_user.id,
@@ -97,6 +109,17 @@ async def mark_news_read(
         )
         db.add(interaction)
         db.commit()
+        
+        # 成就检测 - 阅读相关成就
+        try:
+            check_and_unlock_achievements(
+                user_id=current_user.id,
+                trigger_type='read',
+                news_id=news_id,
+                db=db
+            )
+        except Exception as e:
+            logger.error(f"成就检测失败: {str(e)}")
     
     return {"success": True, "message": "News marked as read"}
 

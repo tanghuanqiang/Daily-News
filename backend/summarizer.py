@@ -5,14 +5,6 @@ from typing import Optional, Dict
 from database import settings
 import logging
 
-# RAG Integration
-try:
-    from rag.knowledge_enhancer import KnowledgeEnhancer, get_knowledge_enhancer
-    RAG_AVAILABLE = True
-except ImportError:
-    RAG_AVAILABLE = False
-    logging.warning("RAG modules not available. Knowledge enhancement disabled.")
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -62,22 +54,6 @@ class NewsSummarizer:
                     logger.error("Failed to initialize NVIDIA client")
         else:
             self.model = "qwen-turbo"  # Low-cost model, can upgrade to "qwen-plus"
-        
-        # Initialize RAG knowledge enhancer
-        self.rag_available = RAG_AVAILABLE
-        if self.rag_available:
-            try:
-                self.knowledge_enhancer = get_knowledge_enhancer()
-                if self.knowledge_enhancer.is_available:
-                    logger.info("RAG Knowledge Enhancer initialized successfully")
-                else:
-                    logger.warning("RAG Knowledge Enhancer not available")
-                    self.rag_available = False
-            except Exception as e:
-                logger.warning(f"Failed to initialize RAG Knowledge Enhancer: {str(e)}")
-                self.rag_available = False
-        else:
-            logger.info("RAG features disabled")
     
     def _check_ollama_connection(self):
         """检查Ollama服务是否可用"""
@@ -120,20 +96,24 @@ class NewsSummarizer:
             title: News title
             content: News content/description
             roast_mode: If True, generate humorous/roast-style summary
-            topic: News topic/category for RAG enhancement
+            topic: News topic/category (legacy parameter, not used after RAG removal)
         
         Returns:
             Summary string
         """
+        # Generate summary using selected provider
         if self.provider == "dashscope":
-            return self._generate_dashscope(title, content, roast_mode, topic)
+            summary = self._generate_dashscope(title, content, roast_mode, topic)
         elif self.provider == "ollama":
-            return self._generate_ollama(title, content, roast_mode, topic)
+            summary = self._generate_ollama(title, content, roast_mode, topic)
         elif self.provider == "nvidia":
-            return self._generate_nvidia(title, content, roast_mode, topic)
+            summary = self._generate_nvidia(title, content, roast_mode, topic)
         else:
             logger.warning(f"Unknown LLM provider: {self.provider}, using fallback")
-            return self._fallback_summary(title, content, roast_mode)
+            summary = self._fallback_summary(title, content, roast_mode)
+        
+        # Post-process summary to ensure format compliance
+        return self._post_process_summary(summary, roast_mode)
 
     def _generate_ollama(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Generate summary using local Ollama model"""
@@ -205,27 +185,27 @@ class NewsSummarizer:
             
             # 构建系统提示词和用户提示词
             if roast_mode:
-                system_prompt = "你是聪明、幽默、有点毒舌的新闻评论员，擅长用俏皮、搞笑、略带吐槽的语气总结新闻。"
-                user_prompt = f"""新闻标题：{title}
+                system_prompt = "你是一个顶级脱口秀演员，擅长用幽默吐槽总结新闻。只输出吐槽内容，不要任何解释。"
+                user_prompt = f"""任务：用1句话吐槽这条新闻
+要求：
+- 抓住最离谱/最搞笑的槽点
+- 使用网络流行语
+- 不超过30字
+- 只输出吐槽内容，不要任何解释、说明或元信息
 
-新闻内容：{content}
-
-请用1-2句话总结这条新闻，要求：
-1. 语气幽默、俏皮，可以适当调侃
-2. 抓住新闻核心要点
-3. 加入一些网络流行语或段子风格
-4. 保持简洁，不超过60字"""
+新闻标题：{title}
+新闻内容：{content}"""
             else:
-                system_prompt = "你是一个专业的新闻摘要助手，擅长用简洁、客观的语言总结新闻要点。"
-                user_prompt = f"""新闻标题：{title}
+                system_prompt = "你是一个专业新闻编辑，擅长写一句话摘要。只输出摘要，不要其他文字。"
+                user_prompt = f"""任务：用1句话总结新闻核心
+要求：
+- 客观中性，不带倾向
+- 抓住5W1H（谁、做了什么、结果）
+- 不超过25字
+- 只输出摘要，不要其他文字
 
-新闻内容：{content}
-
-请用1-2句话总结这条新闻的核心内容，要求：
-1. 客观中性，不带个人情感
-2. 准确提炼关键信息
-3. 语言简洁专业
-4. 不超过50字"""
+新闻标题：{title}
+新闻内容：{content}"""
             
             # 调用NVIDIA API
             response = client.chat.completions.create(
@@ -242,63 +222,24 @@ class NewsSummarizer:
             # 提取摘要
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
-                choice = response.choices[0]
                 
-                # 优先使用content字段
+                # Try content field first
+                summary = None
                 if message and message.content:
                     summary = message.content.strip()
-                    if summary:
-                        logger.info(f"Generated summary (NVIDIA GLM) for: {title[:50]}...")
-                        return summary
                 
-                # 如果content为None，检查reasoning_content字段（GLM推理模式）
-                if hasattr(message, 'reasoning_content') and message.reasoning_content:
-                    reasoning = message.reasoning_content.strip()
-                    logger.info(f"Using reasoning_content from NVIDIA GLM for: {title[:50]}...")
-                    # 尝试从推理内容中提取最终答案
-                    # GLM推理模式会在reasoning_content中包含最终答案
-                    if reasoning:
-                        # 方法1：查找引号中的内容（可能是最终答案）
-                        quoted = re.findall(r'["\']([^"\']+)["\']', reasoning)
-                        if quoted:
-                            # 取最后一个引号内容（通常是最终答案）
-                            summary = quoted[-1].strip()
-                            if summary and len(summary) < 200:  # 合理的长度
-                                return summary
-                        
-                        # 方法2：查找最后一段以引号开头的内容
-                        lines = reasoning.split('\n')
-                        for line in reversed(lines):
-                            line = line.strip()
-                            if line and (line.startswith('"') or line.startswith("'")):
-                                # 提取引号内容
-                                match = re.search(r'["\']([^"\']+)["\']', line)
-                                if match:
-                                    summary = match.group(1).strip()
-                                    if summary and len(summary) < 200:
-                                        return summary
-                        
-                        # 方法3：如果找不到，取最后一段非空行（去除非内容部分）
-                        last_paragraph = ""
-                        for line in reversed(lines):
-                            line = line.strip()
-                            if line and not line.startswith('*') and not line.startswith('6.'):
-                                if '**' not in line:  # 跳过标题行
-                                    last_paragraph = line
-                                    break
-                        
-                        if last_paragraph:
-                            # 提取引号内容或直接使用
-                            match = re.search(r'["\']([^"\']+)["\']', last_paragraph)
-                            if match:
-                                return match.group(1).strip()
-                            return last_paragraph[:150]  # 限制长度
-                        
-                        # 方法4：如果都找不到，返回前200字符
-                        return reasoning[:200]
+                # If content is empty, try reasoning_content (GLM reasoning mode)
+                if not summary and hasattr(message, 'reasoning_content') and message.reasoning_content:
+                    summary = message.reasoning_content.strip()
+                    logger.debug("Using reasoning_content from NVIDIA GLM")
                 
-                # 如果都没有，记录警告
-                finish_reason = choice.finish_reason if hasattr(choice, 'finish_reason') else 'unknown'
+                # If we got a summary, process it with post-processor
+                if summary:
+                    logger.info(f"Generated summary (NVIDIA GLM) for: {title[:50]}...")
+                    return summary
+                
+                # No content found, log warning and use fallback
+                finish_reason = response.choices[0].finish_reason if hasattr(response.choices[0], 'finish_reason') else 'unknown'
                 logger.warning(f"NVIDIA API returned no content. Finish reason: {finish_reason}")
                 return self._fallback_summary(title, content, roast_mode)
             else:
@@ -340,56 +281,32 @@ class NewsSummarizer:
     
     def _build_prompt(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Build prompt for LLM based on mode"""
-        
-        # Try to use RAG enhancement if available
-        if self.rag_available and self.knowledge_enhancer.is_available:
-            try:
-                if roast_mode:
-                    enhanced_prompt = self.knowledge_enhancer.enhance_roast_prompt(
-                        title=title,
-                        content=content,
-                        topic=topic
-                    )
-                else:
-                    enhanced_prompt = self.knowledge_enhancer.enhance_summary_prompt(
-                        title=title,
-                        content=content,
-                        topic=topic
-                    )
-                
-                if enhanced_prompt and len(enhanced_prompt) > len(title):
-                    logger.debug("Using RAG-enhanced prompt")
-                    return enhanced_prompt
-                else:
-                    logger.debug("RAG enhancement returned empty, using basic prompt")
-            except Exception as e:
-                logger.warning(f"RAG enhancement failed: {str(e)}, falling back to basic prompt")
-        
-        # Fallback to basic prompt if RAG not available or failed
         if roast_mode:
-            return f"""你是一个幽默风趣的新闻评论员，擅长用俏皮、搞笑、略带吐槽的语气总结新闻。
+            return f"""你是一个顶级脱口秀演员，擅长用幽默吐槽总结新闻。
+
+任务：用1句话吐槽这条新闻
+要求：
+- 抓住最离谱/最搞笑的槽点
+- 使用网络流行语
+- 不超过30字
+- 只输出吐槽内容，不要任何解释、说明或元信息
 
 新闻标题：{title}
 新闻内容：{content}
 
-请用1-2句话总结这条新闻，要求：
-1. 语气幽默、俏皮，可以适当调侃
-2. 抓住新闻核心要点
-3. 加入一些网络流行语或段子风格
-4. 保持简洁，不超过60字
-
-吐槽式摘要："""
+吐槽："""
         else:
-            return f"""你是一个专业的新闻摘要助手，擅长用简洁、客观的语言总结新闻要点。
+            return f"""你是一个专业新闻编辑，擅长写一句话摘要。
+
+任务：用1句话总结新闻核心
+要求：
+- 客观中性，不带倾向
+- 抓住5W1H（谁、做了什么、结果）
+- 不超过25字
+- 只输出摘要，不要其他文字
 
 新闻标题：{title}
 新闻内容：{content}
-
-请用1-2句话总结这条新闻的核心内容，要求：
-1. 客观中性，不带个人情感
-2. 准确提炼关键信息
-3. 语言简洁专业
-4. 不超过50字
 
 摘要："""
     
@@ -584,6 +501,65 @@ class NewsSummarizer:
             return f"📰 {summary} （AI摘要暂时不可用）"
         else:
             return summary
+    
+    def _post_process_summary(self, summary: str, roast_mode: bool) -> str:
+        """
+        Post-process summary to ensure format compliance
+        
+        Args:
+            summary: Raw summary from LLM
+            roast_mode: Whether it's roast mode
+            
+        Returns:
+            Processed summary string
+        """
+        if not summary:
+            return summary
+        
+        # Remove common LLM meta-text patterns
+        # 1. Remove quotes if the summary is wrapped in them
+        summary = summary.strip()
+        if (summary.startswith('"') and summary.endswith('"')) or \
+           (summary.startswith("'") and summary.endswith("'")):
+            summary = summary[1:-1].strip()
+        
+        # 2. Remove common prefixes like "摘要：", "吐槽：", "答案是", etc.
+        prefixes_to_remove = [
+            "摘要：", "摘要:", "吐槽：", "吐槽:", "答案是", "答案:", 
+            "输出:", "输出：", "结果:", "结果：", "Summary:", "summary:"
+        ]
+        for prefix in prefixes_to_remove:
+            if summary.startswith(prefix):
+                summary = summary[len(prefix):].strip()
+                break
+        
+        # 3. Remove explanations after the summary (common pattern: "摘要: XXXX 这是因为...")
+        # Split on common explanation markers and take the first part
+        for marker in ["这是因为", "原因是", "这是由于", "这表明", "这说明"]:
+            if marker in summary:
+                summary = summary.split(marker)[0].strip()
+        
+        # 4. Apply length limits
+        max_length = 30 if roast_mode else 25
+        if len(summary) > max_length:
+            # Try to find a good truncation point (period, comma, or ellipsis)
+            truncated = summary[:max_length]
+            
+            # Look for natural break points
+            for break_point in ["。", "，", ",", "。", "！", "?", "？", ";", "；"]:
+                pos = truncated.rfind(break_point)
+                if pos > max_length * 0.7:  # Only break if it's at least 70% of max length
+                    summary = truncated[:pos + 1]
+                    break
+            else:
+                # No good break point found, just truncate and add ellipsis
+                summary = truncated[:-1] + "…"
+        
+        # Final strip
+        summary = summary.strip()
+        
+        logger.debug(f"Post-processed summary ({len(summary)} chars): {summary[:50]}...")
+        return summary
     
     def batch_summarize(self, articles: list, roast_mode: bool = False) -> list:
         """

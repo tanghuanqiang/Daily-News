@@ -201,4 +201,52 @@ export const newsAPI = {
   getRagStatus: () => api.get('/api/news/rag/status'),
 };
 
+// P1: 反馈API
+export const feedbackAPI = {
+  createFeedback: (data: { news_id: number; feedback_type: string }) =>
+    api.post('/api/feedback/', data),
+  
+  getMyFeedback: (feedback_type?: string) =>
+    api.get('/api/feedback/my', { params: { feedback_type } }),
+  
+  getFeedbackStats: (newsId: number) =>
+    api.get(`/api/feedback/stats/${newsId}`),
+  
+  deleteFeedback: (feedbackId: number) =>
+    api.delete(`/api/feedback/${feedbackId}`)
+};
+
+// P1: 分享API
+export const sharingAPI = {
+  generateShareContent: (data: {
+    news_id: number;
+    platform?: string;
+    use_roast_mode?: boolean;
+  }) => api.post('/api/share/generate', data),
+  
+  getSupportedPlatforms: () =>
+    api.get('/api/share/platforms'),
+  
+  trackShare: (data: { news_id: number; platform: string }) =>
+    api.post('/api/share/track', data)
+};
+
+// P1: 成就API
+export const achievementsAPI = {
+  getDefinitions: (category?: string) =>
+    api.get('/api/achievements/definitions', { params: { category } }),
+  
+  getMyAchievements: () =>
+    api.get('/api/achievements/my'),
+  
+  getMyAchievementsWithProgress: () =>
+    api.get('/api/achievements/my'),
+  
+  getStats: () =>
+    api.get('/api/achievements/stats'),
+  
+  unlockAchievement: (achievementId: number) =>
+    api.post(`/api/achievements/unlock/${achievementId}`)
+};
+
 export default api;

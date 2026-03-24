@@ -445,45 +445,94 @@ def send_scheduled_emails():
         db.close()
 
 
+def get_user_push_time(user: User) -> tuple[int, int]:
+    """获取用户的推送时间（小时和分钟）
+    
+    如果用户启用了个性化推送且设置了推送时间，则使用个性化时间。
+    否则使用系统默认时间（DAILY_UPDATE_HOUR）。
+    
+    Args:
+        user: 用户对象
+        
+    Returns:
+        tuple: (target_hour, target_minute)
+    """
+    # 如果用户启用了个性化推送且有设置时间，使用用户设置
+    if user.email_schedule_enabled and user.email_schedule_hour is not None:
+        target_hour = user.email_schedule_hour
+        target_minute = user.email_schedule_minute or 0
+        logger.debug(f"用户 {user.id} 使用个性化推送时间: {target_hour:02d}:{target_minute:02d}")
+    else:
+        # 使用系统默认时间
+        target_hour = settings.DAILY_UPDATE_HOUR
+        target_minute = settings.DAILY_UPDATE_MINUTE or 0
+        logger.debug(f"用户 {user.id} 使用默认推送时间: {target_hour:02d}:{target_minute:02d}")
+    
+    return target_hour, target_minute
+
+
 def should_send_email_to_user(user: User, current_time: datetime) -> bool:
-    """检查是否应该向用户发送邮件（根据用户的定时配置，仅支持每天固定时间）
+    """检查是否应该向用户发送邮件（支持个性化推送时间）
     
     使用配置的时区来比较时间，确保时区一致性。
+    支持两种模式：
+    1. 个性化推送：读取用户的 email_schedule_hour 字段
+    2. 默认推送：使用系统配置的 DAILY_UPDATE_HOUR
+    
+    发送条件：
+    - 用户启用了邮件通知
+    - 当前时间匹配目标推送时间（小时和分钟）
+    - 今天还没发送过邮件
     """
-    if not user.email_notifications or not user.email_schedule_enabled:
+    if not user.email_notifications:
+        logger.debug(f"跳过用户 {user.id}: 邮件通知已禁用")
         return False
     
     # 只支持 daily 模式
-    schedule_type = user.email_schedule_type
+    schedule_type = user.email_schedule_type or "daily"
     if schedule_type != "daily":
+        logger.debug(f"跳过用户 {user.id}: 不支持的推送类型 {schedule_type}")
         return False
     
+    # 获取用户的推送时间（个性化或默认）
+    target_hour, target_minute = get_user_push_time(user)
+    
+    # 检查当前时间是否匹配目标时间（精确到分钟）
+    if current_time.hour != target_hour:
+        logger.debug(f"跳过用户 {user.id}: 当前时间 {current_time.hour:02d}:{current_time.minute:02d} 不匹配目标小时 {target_hour:02d}")
+        return False
+    
+    # 分钟检查：在当前时间的第一个10分钟窗口内发送
+    # 例如：目标时间是 10:00，则在 10:00-10:09 之间发送
+    if current_time.minute // 10 != target_minute // 10:
+        logger.debug(f"跳过用户 {user.id}: 当前分钟 {current_time.minute:02d} 不在目标分钟 {target_minute:02d} 的10分钟窗口内")
+        return False
+    
+    # 检查今天是否已发送
     last_sent = user.last_email_sent_at
+    current_date = current_time.date()
     
-    # 每天固定时间发送
-    target_hour = user.email_schedule_hour
-    target_minute = user.email_schedule_minute
+    if not last_sent:
+        logger.info(f"准备发送邮件给用户 {user.id} {user.email}: 今天尚未发送")
+        return True
     
-    # 检查当前时间是否匹配目标时间（允许在目标时间后的1小时内发送）
-    # 使用配置的时区来比较
-    if current_time.hour == target_hour and current_time.minute >= target_minute:
-        # 如果今天还没发送过（使用配置时区的日期）
-        current_date = current_time.date()
-        if not last_sent:
-            return True
-        # 将 last_sent 转换为配置时区进行比较
-        tz = pytz.timezone(settings.TIMEZONE)
-        if last_sent.tzinfo is None:
-            # 如果 last_sent 是 naive datetime，假设它是 UTC
-            last_sent_tz = pytz.UTC.localize(last_sent)
-        else:
-            last_sent_tz = last_sent
-        # 转换为配置时区
-        last_sent_in_tz = last_sent_tz.astimezone(tz)
-        if last_sent_in_tz.date() < current_date:
-            return True
+    # 将 last_sent 转换为配置时区进行比较
+    tz = pytz.timezone(settings.TIMEZONE)
+    if last_sent.tzinfo is None:
+        # 如果 last_sent 是 naive datetime，假设它是 UTC
+        last_sent_tz = pytz.UTC.localize(last_sent)
+    else:
+        last_sent_tz = last_sent
     
-    return False
+    # 转换为配置时区
+    last_sent_in_tz = last_sent_tz.astimezone(tz)
+    
+    if last_sent_in_tz.date() < current_date:
+        logger.info(f"准备发送邮件给用户 {user.id} {user.email}: 上次发送日期 {last_sent_in_tz.date()} 早于今天 {current_date}")
+        return True
+    else:
+        logger.debug(f"跳过用户 {user.id}: 今天已发送过邮件")
+        return False
 
 
 def send_email_to_user(user_id: int, db: Session):
@@ -529,9 +578,10 @@ def send_email_to_user(user_id: int, db: Session):
 
 
 def send_daily_emails(db: Session):
-    """检查所有用户并发送邮件（根据每个用户的定时配置）
+    """检查所有用户并发送邮件（支持个性化推送时间）
     
     使用配置的时区（settings.TIMEZONE）来获取当前时间，而不是服务器本地时间。
+    统计使用个性化推送的用户数量。
     """
     try:
         # Get all active users with email notifications enabled
@@ -548,30 +598,50 @@ def send_daily_emails(db: Session):
         tz = pytz.timezone(settings.TIMEZONE)
         current_time = datetime.now(tz)
         sent_count = 0
+        personalized_count = 0
+        default_count = 0
         
         for user in users:
             try:
                 # Check if should send email based on user's schedule
                 if should_send_email_to_user(user, current_time):
+                    # 统计个性化推送 vs 默认推送
+                    if user.email_schedule_enabled and user.email_schedule_hour is not None:
+                        personalized_count += 1
+                    else:
+                        default_count += 1
+                    
                     send_email_to_user(user.id, db)
                     sent_count += 1
-                else:
-                    logger.debug(f"Skipping email for {user.email} (schedule not met)")
+                # 否则跳过（日志已在 should_send_email_to_user 中记录）
                     
             except Exception as e:
                 logger.error(f"Failed to process email for user {user.email}: {str(e)}")
         
-        # Log completion
+        # Log completion with detailed stats
         today = get_current_date_in_timezone()
+        personalized_pct = (personalized_count / sent_count * 100) if sent_count > 0 else 0
+        
         log = SystemLog(
             log_type="email",
-            message=f"Processed scheduled emails, sent to {sent_count} users",
-            log_metadata={"date": today, "total_users": len(users), "sent_count": sent_count}
+            message=f"Processed scheduled emails, sent to {sent_count} users (个性化: {personalized_count}, 默认: {default_count})",
+            log_metadata={
+                "date": today,
+                "total_users": len(users),
+                "sent_count": sent_count,
+                "personalized_count": personalized_count,
+                "default_count": default_count,
+                "personalized_percentage": round(personalized_pct, 1),
+                "current_time": current_time.isoformat()
+            }
         )
         db.add(log)
         db.commit()
         
         logger.info(f"Email check completed: {sent_count}/{len(users)} users received emails")
+        if sent_count > 0:
+            logger.info(f"  - 个性化推送: {personalized_count} 个用户 ({personalized_pct:.1f}%)")
+            logger.info(f"  - 默认推送: {default_count} 个用户 ({100-personalized_pct:.1f}%)")
         
     except Exception as e:
         logger.error(f"Email sending failed: {str(e)}")
@@ -635,8 +705,14 @@ def build_email_digest(user: User, subscriptions: list, date_str: str, db: Sessi
     return html
 
 
-def send_email(to_email: str, subject: str, html_body: str):
+def send_email(to_email: str, subject: str, html_body: str, from_name: str = None):
     """Send email via SMTP or Resend, using default account if configured
+    
+    Args:
+        to_email: 收件人邮箱
+        subject: 邮件主题
+        html_body: HTML邮件内容
+        from_name: 发件人名称（可选）
     
     Raises:
         ValueError: If no email service is configured
@@ -650,8 +726,14 @@ def send_email(to_email: str, subject: str, html_body: str):
             import resend
             resend.api_key = settings.RESEND_API_KEY
             
+            # 如果提供了from_name，使用 "名称 <邮箱>" 的格式
+            if from_name:
+                from_email = f"{from_name} <{settings.FROM_EMAIL}>"
+            else:
+                from_email = settings.FROM_EMAIL
+            
             params = {
-                "from": settings.FROM_EMAIL,
+                "from": from_email,
                 "to": [to_email],
                 "subject": subject,
                 "html": html_body,
@@ -674,7 +756,13 @@ def send_email(to_email: str, subject: str, html_body: str):
         try:
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
-            msg['From'] = smtp_user
+            
+            # 如果提供了from_name，使用 "名称 <邮箱>" 的格式
+            if from_name:
+                msg['From'] = f"{from_name} <{smtp_user}>"
+            else:
+                msg['From'] = smtp_user
+            
             msg['To'] = to_email
             
             html_part = MIMEText(html_body, 'html', 'utf-8')
@@ -720,220 +808,6 @@ def send_email(to_email: str, subject: str, html_body: str):
         raise ValueError(error_msg)
 
 
-# RAG Vector Indexing Tasks
-try:
-    from rag.vector_store import get_vector_store
-    from rag.embedding_service import get_embedding_service
-    from models import VectorIndexStatus
-    RAG_AVAILABLE = True
-except ImportError:
-    RAG_AVAILABLE = False
-    logging.warning("RAG modules not available. Vector indexing disabled.")
-
-
-def index_news_to_vector_db(db: Session, max_articles: int = 100):
-    """
-    Build vector index for news articles that haven't been indexed yet
-    
-    Args:
-        db: Database session
-        max_articles: Maximum number of articles to index in one run
-    
-    Returns:
-        dict: {"indexed": int, "failed": int, "errors": List[str]}
-    """
-    if not RAG_AVAILABLE:
-        logger.warning("RAG not available, skipping vector indexing")
-        return {"indexed": 0, "failed": 0, "errors": ["RAG not available"]}
-    
-    try:
-        # Initialize services
-        vector_store = get_vector_store()
-        embedding_service = get_embedding_service()
-        
-        if not vector_store.is_available or not embedding_service.is_available:
-            logger.warning("Vector store or embedding service not available")
-            return {"indexed": 0, "failed": 0, "errors": ["Service not available"]}
-        
-        # Get news articles that haven't been indexed yet
-        unindexed_news = db.query(NewsCache).outerjoin(
-            VectorIndexStatus,
-            NewsCache.id == VectorIndexStatus.news_id
-        ).filter(
-            or_(
-                VectorIndexStatus.id.is_(None),
-                VectorIndexStatus.is_indexed == False
-            )
-        ).order_by(NewsCache.fetched_at.desc()).limit(max_articles).all()
-        
-        if not unindexed_news:
-            logger.debug("No unindexed news found")
-            return {"indexed": 0, "failed": 0, "errors": []}
-        
-        logger.info(f"Found {len(unindexed_news)} unindexed news articles")
-        
-        indexed_count = 0
-        failed_count = 0
-        errors = []
-        
-        # Process articles in batches
-        batch_size = 10
-        for i in range(0, len(unindexed_news), batch_size):
-            batch = unindexed_news[i:i + batch_size]
-            
-            # Prepare texts for batch embedding
-            texts = []
-            for news in batch:
-                combined_text = f"{news.title} {news.summary}"[:1000]
-                texts.append(combined_text)
-            
-            # Generate embeddings in batch
-            embeddings = embedding_service.generate_embeddings_batch(texts)
-            
-            # Index each article
-            for j, news in enumerate(batch):
-                try:
-                    embedding = embeddings[j]
-                    if not embedding:
-                        raise Exception("Failed to generate embedding")
-                    
-                    # Add to vector store
-                    success = vector_store.add_news(
-                        news_id=str(news.id),
-                        title=news.title,
-                        content=news.summary,
-                        embedding=embedding,
-                        metadata={
-                            "topic": news.topic,
-                            "source": news.source,
-                            "published_at": news.published_at.isoformat() if news.published_at else None,
-                            "fetched_at": news.fetched_at.isoformat() if news.fetched_at else None
-                        }
-                    )
-                    
-                    if success:
-                        # Update or create index status
-                        index_status = db.query(VectorIndexStatus).filter(
-                            VectorIndexStatus.news_id == news.id
-                        ).first()
-                        
-                        if not index_status:
-                            index_status = VectorIndexStatus(
-                                news_id=news.id,
-                                is_indexed=True,
-                                indexed_at=datetime.utcnow(),
-                                embedding_version=embedding_service.model_name,
-                                index_attempts=1
-                            )
-                            db.add(index_status)
-                        else:
-                            index_status.is_indexed = True
-                            index_status.indexed_at = datetime.utcnow()
-                            index_status.embedding_version = embedding_service.model_name
-                            index_status.index_attempts = (index_status.index_attempts or 0) + 1
-                            index_status.last_error = None
-                        
-                        indexed_count += 1
-                        logger.debug(f"Successfully indexed news: {news.title[:50]}...")
-                    else:
-                        failed_count += 1
-                        errors.append(f"Failed to add news {news.id} to vector store")
-                        
-                except Exception as e:
-                    failed_count += 1
-                    error_msg = f"Failed to index news {news.id}: {str(e)}"
-                    errors.append(error_msg)
-                    logger.error(error_msg)
-                    
-                    # Update index status with error
-                    index_status = db.query(VectorIndexStatus).filter(
-                        VectorIndexStatus.news_id == news.id
-                    ).first()
-                    
-                    if index_status:
-                        index_status.index_attempts = (index_status.index_attempts or 0) + 1
-                        index_status.last_error = str(e)
-                    else:
-                        index_status = VectorIndexStatus(
-                            news_id=news.id,
-                            is_indexed=False,
-                            index_attempts=1,
-                            last_error=str(e)
-                        )
-                        db.add(index_status)
-            
-            # Commit batch
-            db.commit()
-            logger.info(f"Indexed batch {i//batch_size + 1}/{(len(unindexed_news)-1)//batch_size + 1}")
-        
-        logger.info(f"Vector indexing completed: {indexed_count} indexed, {failed_count} failed")
-        
-        return {
-            "indexed": indexed_count,
-            "failed": failed_count,
-            "errors": errors
-        }
-        
-    except Exception as e:
-        logger.error(f"Vector indexing task failed: {str(e)}")
-        db.rollback()
-        return {"indexed": 0, "failed": 0, "errors": [str(e)]}
-
-
-def cleanup_old_vector_indexes(db: Session, days_to_keep: int = 30):
-    """
-    Clean up vector indexes for news older than specified days
-    
-    Args:
-        db: Database session
-        days_to_keep: Keep vectors for news from last N days
-    
-    Returns:
-        dict: {"deleted": int, "errors": List[str]}
-    """
-    if not RAG_AVAILABLE:
-        logger.warning("RAG not available, skipping cleanup")
-        return {"deleted": 0, "errors": ["RAG not available"]}
-    
-    try:
-        vector_store = get_vector_store()
-        if not vector_store.is_available:
-            logger.warning("Vector store not available")
-            return {"deleted": 0, "errors": ["Vector store not available"]}
-        
-        # Clean up old vectors from vector store
-        deleted_count = vector_store.delete_old_news(days_to_keep=days_to_keep)
-        
-        # Clean up old index status records
-        cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
-        old_status_records = db.query(VectorIndexStatus).join(
-            NewsCache,
-            VectorIndexStatus.news_id == NewsCache.id
-        ).filter(
-            NewsCache.fetched_at < cutoff_date
-        ).all()
-        
-        status_deleted = 0
-        for status in old_status_records:
-            db.delete(status)
-            status_deleted += 1
-        
-        db.commit()
-        
-        logger.info(f"Cleaned up {deleted_count} vectors and {status_deleted} status records")
-        
-        return {
-            "deleted": deleted_count,
-            "status_records_deleted": status_deleted,
-            "errors": []
-        }
-        
-    except Exception as e:
-        logger.error(f"Vector cleanup failed: {str(e)}")
-        db.rollback()
-        return {"deleted": 0, "errors": [str(e)]}
-
-
 def start_scheduler():
     """Start the background scheduler - checks user schedules every hour"""
     try:
@@ -961,36 +835,10 @@ def start_scheduler():
             replace_existing=True
         )
         
-        # RAG vector indexing (every 2 hours)
-        if RAG_AVAILABLE:
-            scheduler.add_job(
-                lambda: index_news_to_vector_db(SessionLocal()),
-                IntervalTrigger(
-                    hours=2,
-                    timezone=settings.TIMEZONE
-                ),
-                id='rag_vector_indexing',
-                replace_existing=True
-            )
-            
-            # RAG cleanup (daily at 3 AM)
-            scheduler.add_job(
-                lambda: cleanup_old_vector_indexes(SessionLocal()),
-                CronTrigger(
-                    hour=3,
-                    minute=0,
-                    timezone=settings.TIMEZONE
-                ),
-                id='rag_cleanup',
-                replace_existing=True
-            )
-            
-            logger.info("RAG vector indexing and cleanup tasks scheduled")
-        
         scheduler.start()
         logger.info(
             f"Scheduler started (optimized) - News update at {settings.DAILY_UPDATE_HOUR}:{settings.DAILY_UPDATE_MINUTE:02d}, "
-            f"Email check every hour, Vector indexing every 2 hours ({settings.TIMEZONE})"
+            f"Email check every hour ({settings.TIMEZONE})"
         )
         
     except Exception as e:

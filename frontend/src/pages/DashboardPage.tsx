@@ -5,11 +5,14 @@ import { newsAPI, preferencesAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspaper, Sparkles } from 'lucide-react';
+import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspaper, Sparkles, Shield } from 'lucide-react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useToast } from '@/components/ui/use-toast';
 import { SimilarNews, PersonalizedFeed, RagStatus } from '@/components/rag';
+import { FeedbackButtons } from '@/components/FeedbackButtons';
+import { ShareButton } from '@/components/ShareButton';
+import { AchievementBadge } from '@/components/AchievementBadge';
 
 interface NewsItem {
   id: number;
@@ -338,6 +341,18 @@ export default function DashboardPage() {
                 <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
               
+              {user?.is_admin && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigate('/admin')}
+                  className="h-9 w-9 sm:h-10 sm:w-10 cursor-pointer transition-colors text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300"
+                  title="管理员面板"
+                >
+                  <Shield className="h-4 w-4 sm:h-5 sm:w-5" />
+                </Button>
+              )}
+              
               <Button
                 variant="ghost"
                 size="icon"
@@ -363,6 +378,11 @@ export default function DashboardPage() {
       {/* Main Content - Mobile Optimized */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="space-y-4">
+          {/* 成就徽章展示 */}
+          {user && (
+            <AchievementBadge userId={user.id} />
+          )}
+          
           {/* 个性化推荐区域 - RAG启用时显示 */}
           {ragEnabled && (
             <PersonalizedFeed 
@@ -463,6 +483,17 @@ export default function DashboardPage() {
                                     阅读原文
                                     <ExternalLink className="h-3 w-3" />
                                   </a>
+                                </div>
+                                
+                                {/* 反馈和分享按钮 */}
+                                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                                  <FeedbackButtons newsId={item.id} />
+                                  <ShareButton 
+                                    newsId={item.id} 
+                                    title={item.title} 
+                                    summary={topic.roast_mode ? item.summary_roast || item.summary : item.summary}
+                                    useRoastMode={topic.roast_mode || false}
+                                  />
                                 </div>
                                 
                                 {/* 相似新闻推荐 - RAG启用时显示 */}
