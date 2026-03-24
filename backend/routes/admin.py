@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from database import get_db
-from models import User, NewsArticle, UserPreference, InvitationCode, UserInvitationStats, Experiment, ExperimentVariant
+from models import User, NewsCache, UserPreference, InvitationCode, UserInvitationStats, Experiment, ExperimentVariant
 from services.auth_service import get_current_user
 import logging
 
@@ -31,7 +31,7 @@ def get_overview_data(
         active_users = db.query(User).filter(User.is_active == True).count()
         
         # 新闻统计
-        total_news = db.query(NewsArticle).count()
+        total_news = db.query(NewsCache).count()
         
         # 邀请统计
         total_invites = db.query(InvitationCode).count()
@@ -193,10 +193,10 @@ def get_all_news(
 ):
     """获取新闻列表"""
     try:
-        query = db.query(NewsArticle)
+        query = db.query(NewsCache)
         
         if topic:
-            query = query.filter(NewsArticle.topic == topic)
+            query = query.filter(NewsCache.topic == topic)
         
         news = query.offset(skip).limit(limit).all()
         
