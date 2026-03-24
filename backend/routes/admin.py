@@ -100,9 +100,9 @@ def get_all_users(
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "last_login": user.last_login.isoformat() if user.last_login else None,
                 "preferences": {
-                    "selected_topics": prefs.selected_topics if prefs else [],
-                    "excluded_topics": prefs.excluded_topics if prefs else [],
-                    "preferred_sources": prefs.preferred_sources if prefs else []
+                    "hide_read": prefs.hide_read if prefs else False,
+                    "sort_by": prefs.sort_by if prefs else "time",
+                    "hidden_sources": prefs.hidden_sources if prefs else []
                 } if prefs else None,
                 "invitation_stats": {
                     "total_invited": invite_stats.total_invited if invite_stats else 0,
@@ -153,9 +153,9 @@ def get_user_detail(
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "last_login": user.last_login.isoformat() if user.last_login else None,
             "preferences": {
-                "selected_topics": prefs.selected_topics if prefs else [],
-                "excluded_topics": prefs.excluded_topics if prefs else [],
-                "preferred_sources": prefs.preferred_sources if prefs else []
+                "hide_read": prefs.hide_read if prefs else False,
+                "sort_by": prefs.sort_by if prefs else "time",
+                "hidden_sources": prefs.hidden_sources if prefs else []
             } if prefs else None,
             "invitation_stats": {
                 "total_invited": invite_stats.total_invited if invite_stats else 0,
@@ -209,7 +209,7 @@ def get_all_news(
                 "source": article.source,
                 "url": article.url,
                 "published_at": article.published_at.isoformat() if article.published_at else None,
-                "created_at": article.created_at.isoformat() if article.created_at else None
+                "fetched_at": article.fetched_at.isoformat() if article.fetched_at else None
             }
             for article in news
         ]
@@ -480,7 +480,9 @@ def export_users(
                 "is_active": user.is_active,
                 "is_admin": user.is_admin,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
-                "last_login": user.last_login.isoformat() if user.last_login else None
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+                "email_verified": user.email_verified,
+                "email_notifications": user.email_notifications
             }
             for user in users
         ]
