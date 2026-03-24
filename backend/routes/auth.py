@@ -115,6 +115,8 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     """Login user"""
+    from datetime import datetime
+    
     user = authenticate_user(db, user_data.email, user_data.password)
     if not user:
         raise HTTPException(
@@ -122,6 +124,10 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # 更新最后登录时间
+    user.last_login = datetime.utcnow()
+    db.commit()
     
     access_token = create_access_token(data={"sub": user.email})
     

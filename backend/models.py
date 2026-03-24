@@ -26,6 +26,9 @@ class User(Base):
     email_schedule_interval_hours = Column(Integer, default=24)  # 间隔小时数
     last_email_sent_at = Column(DateTime, nullable=True)  # 上次发送邮件的时间
     
+    # 登录相关
+    last_login = Column(DateTime, nullable=True)  # 上次登录时间
+    
     # Relationships
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
 
