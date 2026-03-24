@@ -10,31 +10,12 @@ services:
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-18888}:8000"
+    env_file:
+      - .env
     environment:
       - HOST=0.0.0.0
       - PORT=8000
       - WORKERS=1
-      # 从.env文件读取其他环境变量
-      - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./daily_digest.db}
-      - LLM_PROVIDER=${LLM_PROVIDER:-dashscope}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
-      - NVIDIA_MODEL=${NVIDIA_MODEL:-z-ai/glm4.7}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:18889,http://localhost:5173,http://localhost}
-      - GNEWS_API_KEY=${GNEWS_API_KEY:-}
-      - NEWSDATA_API_KEY=${NEWSDATA_API_KEY:-}
-      - RESEND_API_KEY=${RESEND_API_KEY:-}
-      - FROM_EMAIL=${FROM_EMAIL:-noreply@dailydigest.com}
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - DEFAULT_EMAIL_ACCOUNT=${DEFAULT_EMAIL_ACCOUNT:-}
-      - DEFAULT_EMAIL_PASSWORD=${DEFAULT_EMAIL_PASSWORD:-}
-      - TIMEZONE=${TIMEZONE:-Asia/Shanghai}
     volumes:
       - ./backend/data:/app/data
       - ./backend/logs:/app/logs
@@ -54,6 +35,8 @@ services:
     image: postgres:15-alpine
     container_name: daily-digest-db
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-dailydigest}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -81,8 +64,8 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-18889}:80"
-    environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:18888}
+    env_file:
+      - .env
     networks:
       - daily-digest-network
     depends_on:
