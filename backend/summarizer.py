@@ -180,7 +180,15 @@ class NewsSummarizer:
             return self._fallback_summary(title, content, roast_mode)
 
     def _generate_nvidia(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
-        """Generate summary using NVIDIA GLM API"""
+        """Generate summary using NVIDIA GLM API.
+        
+        Uses _build_chat_prompt (few-shot + system/user separation) for consistent
+        prompt engineering across all providers.
+        
+        Note on GLM4.7 thinking mode: GLM4.7 is a reasoning-enhanced model that outputs
+        both `reasoning_content` (CoT process) and `content` (final answer). We disable
+        thinking mode via extra_body to get direct answers and reduce token usage.
+        """
         if not settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY == "":
             logger.warning("NVIDIA API key not configured, using fallback summary")
             return self._fallback_summary(title, content, roast_mode)
@@ -191,64 +199,39 @@ class NewsSummarizer:
                 logger.error("NVIDIA client not available")
                 return self._fallback_summary(title, content, roast_mode)
             
-            # 构建系统提示词和用户提示词
-            if roast_mode:
-                system_prompt = "你是一个顶级脱口秀演员，擅长用幽默吐槽总结新闻。只输出吐槽内容，不要任何解释。"
-                user_prompt = f"""任务：用1句话吐槽这条新闻
-要求：
-- 抓住最离谱/最搞笑的槽点
-- 使用网络流行语
-- 不超过30字
-- 只输出吐槽内容，不要任何解释、说明或元信息
-
-新闻标题：{title}
-新闻内容：{content}"""
-            else:
-                system_prompt = "你是一个专业新闻编辑，擅长写一句话摘要。只输出摘要，不要其他文字。"
-                user_prompt = f"""任务：用1句话总结新闻核心
-要求：
-- 客观中性，不带倾向
-- 抓住5W1H（谁、做了什么、结果）
-- 不超过25字
-- 只输出摘要，不要其他文字
-
-新闻标题：{title}
-新闻内容：{content}"""
+            # 使用统一的 chat prompt 构建方法（few-shot + 分离 system/user）
+            system_prompt, user_prompt = self._build_chat_prompt(title, content, roast_mode, topic)
             
-            # 调用NVIDIA API
+            # 调用NVIDIA API，禁用 GLM4.7 的 thinking 模式
+            # thinking 模式下 reasoning_content 是 CoT 推理过程，不应作为摘要使用
+            # 禁用后 message.content 直接是最终答案，稳定且省 token
             response = client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.8 if roast_mode else 0.3,
-                max_tokens=800,  # 增加到800，避免截断
-                stream=False
+                temperature=0.85 if roast_mode else 0.3,
+                max_tokens=200,
+                stream=False,
+                extra_body={"chat_template_kwargs": {"thinking": False}}
             )
             
-            # 提取摘要
+            # 提取摘要 — 只使用 message.content，不使用 reasoning_content
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
                 
-                # Try content field first
-                summary = None
                 if message and message.content:
                     summary = message.content.strip()
-                
-                # If content is empty, try reasoning_content (GLM reasoning mode)
-                if not summary and hasattr(message, 'reasoning_content') and message.reasoning_content:
-                    summary = message.reasoning_content.strip()
-                    logger.debug("Using reasoning_content from NVIDIA GLM")
-                
-                # If we got a summary, process it with post-processor
-                if summary:
                     logger.info(f"Generated summary (NVIDIA GLM) for: {title[:50]}...")
                     return summary
                 
-                # No content found, log warning and use fallback
-                finish_reason = response.choices[0].finish_reason if hasattr(response.choices[0], 'finish_reason') else 'unknown'
-                logger.warning(f"NVIDIA API returned no content. Finish reason: {finish_reason}")
+                # content 为空：记录 finish_reason 帮助诊断，直接走 fallback
+                finish_reason = getattr(response.choices[0], 'finish_reason', 'unknown')
+                logger.warning(
+                    f"NVIDIA API returned empty content for: {title[:50]}. "
+                    f"Finish reason: {finish_reason}. Using fallback."
+                )
                 return self._fallback_summary(title, content, roast_mode)
             else:
                 logger.error("NVIDIA API returned empty choices")
@@ -639,15 +622,29 @@ class NewsSummarizer:
         first_line = summary.split('\n')[0].strip() if summary else ""
         
         LEAK_INDICATORS = [
-            '顶级脱口秀', '脱口秀演员', '分析用户请求', '分析请求',
+            # 旧版 system_prompt 泄露（NVIDIA 路径历史遗留）
+            '顶级脱口秀', '脱口秀演员', '脱口秀表演',
+            # prompt 结构泄露
+            '分析用户请求', '分析请求', '分析用户需求',
             '角色：', '角色:', '任务：', '任务:', '要求：', '要求:',
-            '新闻标题：', '新闻内容：', '只输出', '不要任何解释',
+            '新闻标题：', '新闻内容：',
+            '只输出', '不要任何解释',
             '你是一个', '用1句话', '擅长写', '限制条件',
+            # few-shot 示例标签泄露
+            '示例1', '示例2', '示例3',
+            # 角色描述泄露
+            '吐槽风格', '嘲讽风格', '幽默吐槽', '幽默、吐槽',
         ]
         
         is_leaked = any(indicator in summary for indicator in LEAK_INDICATORS)
-        # Also flag if the summary is multi-line and longer than 60 chars (likely a full prompt output)
-        is_multi_line_garbage = '\n' in summary.strip() and len(summary) > 60
+        # Multi-line garbage check: in roast mode, valid output is always a single short sentence.
+        # In normal mode, multi-line output almost always means reasoning model CoT leaked through.
+        if roast_mode:
+            # roast: 多行且较长 = 泄露（正常吐槽不会换行）
+            is_multi_line_garbage = '\n' in summary.strip() and len(summary) > 30
+        else:
+            # normal: 多行且较长 = 很可能是推理模型把 CoT 输出出来了
+            is_multi_line_garbage = '\n' in summary.strip() and len(summary) > 60
         
         if is_leaked or is_multi_line_garbage:
             logger.warning(
