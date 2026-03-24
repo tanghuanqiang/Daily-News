@@ -104,16 +104,25 @@ export const authAPI = {
   login: (email: string, password: string) =>
     api.post('/api/auth/login', { email, password }),
 
-  register: (email: string, password: string, verification_code: string) =>
+  register: (email: string, password: string, verification_code?: string) =>
     api.post('/api/auth/register', { email, password, verification_code }),
 
   verifyEmail: (email: string, code: string) =>
     api.post('/api/auth/verify-email', { email, verification_code: code }),
 
+  verifyCode: (email: string, code: string) =>
+    api.post('/api/auth/verify-email', { email, verification_code: code }),
+
   resendVerification: (email: string) =>
     api.post('/api/auth/resend-verification', { email }),
 
+  sendVerificationCode: (email: string) =>
+    api.post('/api/auth/resend-verification', { email }),
+
   forgotPassword: (email: string) =>
+    api.post('/api/auth/forgot-password', { email }),
+
+  sendResetPasswordCode: (email: string) =>
     api.post('/api/auth/forgot-password', { email }),
 
   resetPassword: (email: string, code: string, newPassword: string) =>
@@ -129,31 +138,50 @@ export const authAPI = {
 export const subscriptionsAPI = {
   getAll: () => api.get('/api/subscriptions/'),
 
-  create: (data: { topic: string; roast_mode?: boolean }) =>
-    api.post('/api/subscriptions/', data),
+  create: (data: { topic: string; roast_mode?: boolean } | string, roast_mode?: boolean) => {
+    // 支持两种调用方式：
+    // 1. create({ topic: 'xxx', roast_mode: true }) - 对象方式
+    // 2. create('xxx', true) - 参数方式
+    if (typeof data === 'string') {
+      return api.post('/api/subscriptions/', { topic: data, roast_mode });
+    }
+    return api.post('/api/subscriptions/', data);
+  },
 
   update: (id: number, data: { roast_mode?: boolean; is_active?: boolean }) =>
     api.put(`/api/subscriptions/${id}`, data),
 
   delete: (id: number) => api.delete(`/api/subscriptions/${id}`),
 
+  // Preset topics
+  getPresetTopics: () => api.get('/api/subscriptions/preset-topics'),
+
   // Custom RSS feeds
   getCustomFeeds: () => api.get('/api/subscriptions/custom-feeds'),
+  getCustomRSSFeeds: () => api.get('/api/subscriptions/custom-feeds'),
 
   createCustomFeed: (data: { topic: string; feed_url: string }) =>
     api.post('/api/subscriptions/custom-feeds', data),
+  createCustomRSSFeed: (topic: string, feed_url: string) =>
+    api.post('/api/subscriptions/custom-feeds', { topic, feed_url }),
 
   updateCustomFeed: (id: number, data: { is_active?: boolean; roast_mode?: boolean }) =>
     api.put(`/api/subscriptions/custom-feeds/${id}`, data),
+  updateCustomRSSFeed: (id: number, data: { is_active?: boolean; roast_mode?: boolean }) =>
+    api.put(`/api/subscriptions/custom-feeds/${id}`, data),
 
   deleteCustomFeed: (id: number) => api.delete(`/api/subscriptions/custom-feeds/${id}`),
+  deleteCustomRSSFeed: (id: number) => api.delete(`/api/subscriptions/custom-feeds/${id}`),
 };
 
 // Preferences API
 export const preferencesAPI = {
   get: () => api.get('/api/preferences/'),
+  getMyPreferences: () => api.get('/api/preferences/'),
 
   update: (data: { hide_read?: boolean; sort_by?: string; hidden_sources?: string[] }) =>
+    api.put('/api/preferences/', data),
+  updateMyPreferences: (data: { hide_read?: boolean; sort_by?: string; hidden_sources?: string[] }) =>
     api.put('/api/preferences/', data),
 
   hideSource: (source: string) =>
@@ -161,11 +189,15 @@ export const preferencesAPI = {
 
   unhideSource: (source: string) =>
     api.post('/api/preferences/unhide-source', { source }),
+
+  markRead: (newsId: number) =>
+    api.post(`/api/preferences/mark-read/${newsId}`),
 };
 
 // Schedule API
 export const scheduleAPI = {
   getSchedule: () => api.get('/api/schedule/'),
+  getMySchedule: () => api.get('/api/schedule/'),
 
   updateSchedule: (data: {
     enabled?: boolean;
@@ -175,8 +207,17 @@ export const scheduleAPI = {
     day_of_week?: number;
     interval_hours?: number;
   }) => api.put('/api/schedule/', data),
+  updateMySchedule: (data: {
+    enabled?: boolean;
+    schedule_type?: string;
+    hour?: number;
+    minute?: number;
+    day_of_week?: number;
+    interval_hours?: number;
+  }) => api.put('/api/schedule/', data),
 
   getSendNow: () => api.post('/api/schedule/send-now'),
+  testEmail: () => api.post('/api/schedule/send-now'),
 };
 
 // News API
