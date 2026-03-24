@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
-import api from '@/lib/api';
+import { feedbackAPI } from '@/lib/api';
 
 interface FeedbackButtonsProps {
   newsId: number;
@@ -18,7 +18,7 @@ export function FeedbackButtons({ newsId, className = "" }: FeedbackButtonsProps
 
     setIsSubmitting(true);
     try {
-      await api.feedback.createFeedback({
+      await feedbackAPI.createFeedback({
         news_id: newsId,
         feedback_type: feedbackType
       });

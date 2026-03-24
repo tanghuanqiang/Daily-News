@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
-import api from '@/lib/api';
+import { sharingAPI } from '@/lib/api';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,14 +32,14 @@ export function ShareButton({
     setIsSharing(true);
     try {
       // 生成分享文案
-      const shareContent = await api.sharing.generateShareContent({
+      const shareContent = await sharingAPI.generateShareContent({
         news_id: newsId,
         platform,
         use_roast_mode: useRoastMode
       });
 
       // 记录分享行为
-      await api.sharing.trackShare({
+      await sharingAPI.trackShare({
         news_id: newsId,
         platform
       });

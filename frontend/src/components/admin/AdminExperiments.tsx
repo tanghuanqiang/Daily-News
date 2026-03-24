@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { TestTube, BarChart3, Play, Pause, RotateCcw } from 'lucide-react';
+import { BarChart3, Play, Pause, RotateCcw } from 'lucide-react';
 
 interface Experiment {
   id: number;

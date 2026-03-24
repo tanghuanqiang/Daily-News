@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
-import api from '@/lib/api';
+import { achievementsAPI } from '@/lib/api';
 import { TrophyIcon } from '@/components/ui/icons/TrophyIcon';
 
 interface Achievement {
@@ -42,8 +42,8 @@ export function AchievementBadge({ userId }: AchievementBadgeProps) {
     try {
       setLoading(true);
       const [achievementsRes, statsRes] = await Promise.all([
-        api.achievements.getMyAchievementsWithProgress(),
-        api.achievements.getStats()
+        achievementsAPI.getMyAchievementsWithProgress(),
+        achievementsAPI.getStats()
       ]);
 
       setAchievements(achievementsRes.data);
