@@ -282,14 +282,17 @@ class NewsSummarizer:
     def _build_prompt(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Build prompt for LLM based on mode"""
         if roast_mode:
-            return f"""你是一个顶级脱口秀演员，擅长用幽默吐槽总结新闻。
+            return f"""任务：用1句话吐槽这条新闻
 
-任务：用1句话吐槽这条新闻
-要求：
-- 抓住最离谱/最搞笑的槽点
-- 使用网络流行语
-- 不超过30字
-- 只输出吐槽内容，不要任何解释、说明或元信息
+要求（必须遵守）：
+1. 只输出吐槽内容，不要任何解释、说明或元信息
+2. 不要输出"分析请求"、"角色"、"任务"、"要求"等标题
+3. 不要输出编号列表（如1. 2. 3.）
+4. 不要输出markdown格式（如**粗体**、##标题）
+5. 只输出纯文本吐槽
+6. 抓住最离谱/最搞笑的槽点
+7. 使用网络流行语
+8. 不超过30字
 
 新闻标题：{title}
 新闻内容：{content}
@@ -539,7 +542,44 @@ class NewsSummarizer:
             if marker in summary:
                 summary = summary.split(marker)[0].strip()
         
-        # 4. Apply length limits
+        # 4. Clean up prompt leak patterns (for roast mode)
+        if roast_mode:
+            # Remove markdown headings and bold markers
+            summary = re.sub(r'^#{1,6}\s*', '', summary, flags=re.MULTILINE)  # Remove # headings
+            summary = re.sub(r'\*\*([^*]+)\*\*', r'\1', summary)  # Remove **bold**
+            summary = re.sub(r'\*([^*]+)\*', r'\1', summary)  # Remove *italic*
+            
+            # Remove numbered list markers at line start
+            summary = re.sub(r'^\s*\d+\.\s*', '', summary, flags=re.MULTILINE)
+            
+            # Remove common prompt leak keywords and patterns
+            prompt_leak_patterns = [
+                r'分析请求[:：]?\s*',
+                r'角色[:：]?\s*',
+                r'任务[:：]?\s*',
+                r'要求[:：]?\s*',
+                r'\*\*分析请求\*\*[:：]?\s*',
+                r'\*\*角色\*\*[:：]?\s*',
+                r'\*\*任务\*\*[:：]?\s*',
+                r'\*\*要求\*\*[:：]?\s*',
+                r'你是一个[^，。！？]*[，。！？]\s*',
+                r'新闻标题[:：]?[^\n]*\n',
+                r'新闻内容[:：]?[^\n]*\n',
+                r'只输出吐槽内容[^\n]*\n',
+                r'不要任何解释[^\n]*\n',
+            ]
+            
+            for pattern in prompt_leak_patterns:
+                summary = re.sub(pattern, '', summary, flags=re.IGNORECASE)
+            
+            # Remove any remaining markdown code blocks
+            summary = re.sub(r'```[^\n]*\n?', '', summary)
+            summary = re.sub(r'```$', '', summary)
+            
+            # Remove extra whitespace and newlines
+            summary = re.sub(r'\n{3,}', '\n\n', summary)
+        
+        # 5. Apply length limits
         max_length = 30 if roast_mode else 25
         if len(summary) > max_length:
             # Try to find a good truncation point (period, comma, or ellipsis)
