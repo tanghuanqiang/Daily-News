@@ -32,11 +32,12 @@ export function ShareButton({
     setIsSharing(true);
     try {
       // 生成分享文案
-      const shareContent = await sharingAPI.generateShareContent({
+      const shareContentRes = await sharingAPI.generateShareContent({
         news_id: newsId,
         platform,
         use_roast_mode: useRoastMode
       });
+      const shareContent = shareContentRes.data;
 
       // 记录分享行为
       await sharingAPI.trackShare({
