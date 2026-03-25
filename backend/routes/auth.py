@@ -28,13 +28,10 @@ class VerificationRequest(BaseModel):
 class VerificationCodeVerify(BaseModel):
     email: str
     code: str
-    verification_code: str = None  # 兼容前端的字段名（别名）
     
-    def __init__(self, **data):
-        super().__init__(**data)
-        # 如果提供了 verification_code 但没有 code，则使用 verification_code
-        if self.verification_code and not self.code:
-            self.code = self.verification_code
+    # 使用模型配置允许额外字段
+    class Config:
+        extra = "allow"  # 允许额外字段
 
 
 # Pydantic models for password reset
@@ -204,12 +201,30 @@ async def verify_reset_password_code(
 
 @router.post("/reset-password")
 async def reset_password(
-    request: ResetPasswordRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    """Reset user password"""
+    """Reset user password（兼容 verification_code 字段）"""
+    # 手动解析 JSON 请求体，支持 verification_code 字段
+    try:
+        body = await request.json()
+        email = body.get("email")
+        code = body.get("code") or body.get("verification_code")
+        new_password = body.get("new_password")
+        
+        if not email or not code or not new_password:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="email, code (or verification_code), and new_password are required"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request body: {str(e)}"
+        )
+    
     # Verify code - this will also ensure the user exists and the code is valid
-    is_valid = verify_verification_code(db, request.email, request.code)
+    is_valid = verify_verification_code(db, email, code)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -218,9 +233,9 @@ async def reset_password(
     
     # Reset password
     try:
-        update_user_password(db, request.email, request.new_password)
+        update_user_password(db, email, new_password)
         # Generate access token for automatic login
-        access_token = create_access_token(data={"sub": request.email})
+        access_token = create_access_token(data={"sub": email})
         return {"message": "Password reset successfully", "access_token": access_token, "token_type": "bearer"}
     except Exception as e:
         raise HTTPException(
@@ -250,15 +265,44 @@ async def resend_verification_alias(
 
 @router.post("/verify-email")
 async def verify_email_alias(
-    request: VerificationCodeVerify,
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    """验证邮箱（/verify-code 的别名，兼容前端字段名）"""
-    # 前端可能发送 verification_code 字段，但我们统一用 code
-    if hasattr(request, 'verification_code') and not request.code:
-        request.code = request.verification_code
+    """验证邮箱（/verify-code 的别名，兼容 verification_code 字段）"""
+    # 手动解析 JSON 请求体，支持 verification_code 字段
+    try:
+        body = await request.json()
+        email = body.get("email")
+        code = body.get("code") or body.get("verification_code")
+        
+        if not email or not code:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="email and code (or verification_code) are required"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request body: {str(e)}"
+        )
     
-    return await verify_code(request, db)
+    # Check if user already exists
+    existing_user = get_user_by_email(db, email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Verify code
+    is_valid = verify_verification_code(db, email, code)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code"
+        )
+    
+    return {"message": "Verification successful"}
 
 
 @router.post("/forgot-password")

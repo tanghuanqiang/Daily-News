@@ -30,19 +30,15 @@
 
 ### 1. 认证路由 (auth.py)
 
-#### 新增模型字段
+#### 模型配置修改
 ```python
-class ResetPasswordRequest(BaseModel):
+class VerificationCodeVerify(BaseModel):
     email: str
     code: str
-    new_password: str
-    verification_code: str = None  # 兼容前端的字段名（别名）
     
-    def __init__(self, **data):
-        super().__init__(**data)
-        # 如果提供了 verification_code 但没有 code，则使用 verification_code
-        if self.verification_code and not self.code:
-            self.code = self.verification_code
+    # 使用模型配置允许额外字段
+    class Config:
+        extra = "allow"  # 允许额外字段
 ```
 
 #### 新增路由别名
@@ -62,15 +58,36 @@ async def resend_verification_alias(
         raise HTTPException(status_code=500, detail=f"Failed to send verification code: {str(e)}")
 ```
 
-**1.2 `/verify-email` 别名**
+**1.2 `/verify-email` 别名（手动解析 JSON）**
 ```python
 @router.post("/verify-email")
 async def verify_email_alias(
-    request: VerificationCodeVerify,
+    request: Request,
     db: Session = Depends(get_db)
 ):
-    """验证邮箱（/verify-code 的别名）"""
-    return await verify_code(request, db)
+    """验证邮箱（/verify-code 的别名，兼容 verification_code 字段）"""
+    # 手动解析 JSON 请求体，支持 verification_code 字段
+    try:
+        body = await request.json()
+        email = body.get("email")
+        code = body.get("code") or body.get("verification_code")
+        
+        if not email or not code:
+            raise HTTPException(status_code=422, detail="email and code required")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {str(e)}")
+    
+    # Check if user already exists
+    existing_user = get_user_by_email(db, email)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Verify code
+    is_valid = verify_verification_code(db, email, code)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+    
+    return {"message": "Verification successful"}
 ```
 
 **1.3 `/forgot-password` 别名**
@@ -84,7 +101,41 @@ async def forgot_password_alias(
     return await send_reset_password_code(request, db)
 ```
 
-**1.4 `/profile` 别名**
+**1.4 `/reset-password`（手动解析 JSON）**
+```python
+@router.post("/reset-password")
+async def reset_password(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Reset user password（兼容 verification_code 字段）"""
+    # 手动解析 JSON 请求体，支持 verification_code 字段
+    try:
+        body = await request.json()
+        email = body.get("email")
+        code = body.get("code") or body.get("verification_code")
+        new_password = body.get("new_password")
+        
+        if not email or not code or not new_password:
+            raise HTTPException(status_code=422, detail="Missing required fields")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {str(e)}")
+    
+    # Verify code
+    is_valid = verify_verification_code(db, email, code)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+    
+    # Reset password
+    try:
+        update_user_password(db, email, new_password)
+        access_token = create_access_token(data={"sub": email})
+        return {"message": "Password reset successfully", "access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset password: {str(e)}")
+```
+
+**1.5 `/profile` 别名**
 ```python
 @router.put("/profile")
 async def update_profile(
@@ -95,6 +146,8 @@ async def update_profile(
     """更新用户配置（目前仅支持 email_notifications 开关）"""
     return await update_email_notifications(enabled, current_user, db)
 ```
+
+**重要说明**：`/verify-email` 和 `/reset-password` 采用手动解析 JSON 的方式，而不是依赖 Pydantic 模型，这样可以正确处理前端发送的 `verification_code` 字段，避免 Pydantic 在 `__init__` 之前的字段验证失败。
 
 ---
 
