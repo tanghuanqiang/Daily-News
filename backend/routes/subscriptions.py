@@ -235,3 +235,46 @@ async def delete_custom_rss_feed(
     db.commit()
     
     return None
+
+
+# ==================== 前端兼容路由（别名）====================
+# custom-feeds 是 custom-rss 的别名
+
+@router.get("/custom-feeds", response_model=List[CustomRSSFeedResponse])
+async def get_custom_feeds_alias(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """获取自定义订阅源（/custom-rss 的别名）"""
+    return await get_custom_rss_feeds(current_user, db)
+
+
+@router.post("/custom-feeds", response_model=CustomRSSFeedResponse, status_code=status.HTTP_201_CREATED)
+async def create_custom_feed_alias(
+    feed_data: CustomRSSFeedCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """创建自定义订阅源（/custom-rss 的别名）"""
+    return await create_custom_rss_feed(feed_data, current_user, db)
+
+
+@router.put("/custom-feeds/{feed_id}", response_model=CustomRSSFeedResponse)
+async def update_custom_feed_alias(
+    feed_id: int,
+    feed_data: CustomRSSFeedUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """更新自定义订阅源（/custom-rss 的别名）"""
+    return await update_custom_rss_feed(feed_id, feed_data, current_user, db)
+
+
+@router.delete("/custom-feeds/{feed_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_custom_feed_alias(
+    feed_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """删除自定义订阅源（/custom-rss 的别名）"""
+    return await delete_custom_rss_feed(feed_id, current_user, db)

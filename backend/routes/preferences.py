@@ -145,3 +145,70 @@ async def mark_news_unread(
         return {"success": True, "message": "News marked as unread"}
     else:
         return {"success": True, "message": "News was already unread"}
+
+
+# ==================== 前端兼容路由（别名）====================
+
+@router.get("/", response_model=UserPreferenceResponse)
+async def get_preferences_alias(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的偏好设置（/me 的别名）"""
+    return await get_my_preferences(current_user, db)
+
+
+@router.put("/", response_model=UserPreferenceResponse)
+async def update_preferences_alias(
+    update_data: UserPreferenceUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """更新当前用户的偏好设置（/me 的别名）"""
+    return await update_my_preferences(update_data, current_user, db)
+
+
+@router.post("/hide-source")
+async def hide_source(
+    source: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """隐藏特定来源（便捷接口）"""
+    preference = get_or_create_user_preference(current_user.id, db)
+    
+    if source not in preference.hidden_sources:
+        preference.hidden_sources.append(source)
+        preference.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(preference)
+    
+    return preference
+
+
+@router.post("/unhide-source")
+async def unhide_source(
+    source: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """取消隐藏特定来源（便捷接口）"""
+    preference = get_or_create_user_preference(current_user.id, db)
+    
+    if source in preference.hidden_sources:
+        preference.hidden_sources.remove(source)
+        preference.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(preference)
+    
+    return preference
+
+
+@router.post("/mark-read/{news_id}")
+async def mark_read_alias(
+    news_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """标记新闻为已读（/read/{news_id} 的别名）"""
+    return await mark_news_read(news_id, current_user, db)

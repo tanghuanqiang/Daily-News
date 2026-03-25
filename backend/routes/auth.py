@@ -35,6 +35,13 @@ class ResetPasswordRequest(BaseModel):
     email: str
     code: str
     new_password: str
+    verification_code: str = None  # 兼容前端的字段名（别名）
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # 如果提供了 verification_code 但没有 code，则使用 verification_code
+        if self.verification_code and not self.code:
+            self.code = self.verification_code
 
 
 @router.post("/send-verification-code")
@@ -213,3 +220,54 @@ async def reset_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset password: {str(e)}"
         )
+
+
+# ==================== 前端兼容路由（别名）====================
+
+@router.post("/resend-verification")
+async def resend_verification_alias(
+    request: VerificationRequest,
+    db: Session = Depends(get_db)
+):
+    """重发注册验证码（/send-verification-code 的别名，用于已注册但未验证的用户）"""
+    # 对于已注册但未验证的用户，不检查用户是否存在
+    try:
+        create_verification_code(db, request.email)
+        return {"message": "Verification code sent successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send verification code: {str(e)}"
+        )
+
+
+@router.post("/verify-email")
+async def verify_email_alias(
+    request: VerificationCodeVerify,
+    db: Session = Depends(get_db)
+):
+    """验证邮箱（/verify-code 的别名，兼容前端字段名）"""
+    # 前端可能发送 verification_code 字段，但我们统一用 code
+    if hasattr(request, 'verification_code') and not request.code:
+        request.code = request.verification_code
+    
+    return await verify_code(request, db)
+
+
+@router.post("/forgot-password")
+async def forgot_password_alias(
+    request: VerificationRequest,
+    db: Session = Depends(get_db)
+):
+    """忘记密码（/send-reset-password-code 的别名）"""
+    return await send_reset_password_code(request, db)
+
+
+@router.put("/profile")
+async def update_profile(
+    enabled: bool,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """更新用户配置（目前仅支持 email_notifications 开关）"""
+    return await update_email_notifications(enabled, current_user, db)

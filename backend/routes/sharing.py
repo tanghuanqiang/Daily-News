@@ -9,12 +9,20 @@ from models import (
 )
 from auth import get_current_active_user
 from services.achievement_service import check_and_unlock_achievements
+from pydantic import BaseModel
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/share", tags=["Sharing"])
+
+
+# Pydantic model for share generation
+class ShareGenerationRequest(BaseModel):
+    news_id: int
+    platform: str = 'copy'
+    use_roast_mode: bool = False
 
 # 分享模板配置
 SHARE_TEMPLATES = {
@@ -39,9 +47,7 @@ SHARE_TEMPLATES = {
 
 @router.post("/generate", response_model=ShareTemplateResponse)
 async def generate_share_content(
-    news_id: int,
-    platform: str = 'copy',
-    use_roast_mode: bool = False,
+    request: ShareGenerationRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -49,15 +55,16 @@ async def generate_share_content(
     生成优化的分享文案
     
     Args:
-        news_id: 新闻ID
-        platform: 目标平台（wechat, weibo, twitter, copy）
-        use_roast_mode: 是否使用吐槽模式摘要
+        request: 分享生成请求（包含 news_id, platform, use_roast_mode）
         current_user: 当前用户
         db: 数据库会话
         
     Returns:
         分享文案
     """
+    news_id = request.news_id
+    platform = request.platform
+    use_roast_mode = request.use_roast_mode
     try:
         # 验证平台
         if platform not in SHARE_TEMPLATES:

@@ -114,3 +114,33 @@ async def test_email_schedule(
     except Exception as e:
         logger.error(f"Test email failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 前端兼容路由（别名）====================
+
+@router.get("/", response_model=UserScheduleStatus)
+async def get_schedule_alias(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的定时任务配置（/me 的别名）"""
+    return await get_my_schedule(current_user, db)
+
+
+@router.put("/")
+async def update_schedule_alias(
+    config: UserScheduleConfig,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """更新当前用户的定时任务配置（/me 的别名）"""
+    return await update_my_schedule(config, current_user, db)
+
+
+@router.post("/send-now")
+async def send_now_alias(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """立即发送邮件（/test-email 的别名）"""
+    return await test_email_schedule(current_user, db)
