@@ -28,6 +28,13 @@ class VerificationRequest(BaseModel):
 class VerificationCodeVerify(BaseModel):
     email: str
     code: str
+    verification_code: str = None  # 兼容前端的字段名（别名）
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # 如果提供了 verification_code 但没有 code，则使用 verification_code
+        if self.verification_code and not self.code:
+            self.code = self.verification_code
 
 
 # Pydantic models for password reset
