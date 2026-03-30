@@ -84,23 +84,33 @@ async def get_my_achievements_with_progress(
             ua.achievement_id for ua in user_achievements
         }
         
-        # 构建响应
+        # 构建响应 - 扁平化结构
         result = []
         for achievement in all_achievements:
             is_unlocked = achievement.id in unlocked_achievement_ids
+            
+            # 获取解锁时间
+            unlocked_at = next((
+                ua.unlocked_at for ua in user_achievements 
+                if ua.achievement_id == achievement.id
+            ), None)
             
             # 计算进度（简化版本，实际项目中需要根据具体逻辑计算）
             progress = 1.0 if is_unlocked else 0.0
             current_value = 1 if is_unlocked else 0
             requirement_value = 1
             
+            # 扁平化返回，与前端期望一致
             result.append({
-                "achievement": achievement,
+                "id": achievement.id,
+                "code": achievement.code,
+                "name": achievement.name,
+                "description": achievement.description,
+                "icon": achievement.icon,
+                "category": achievement.category,
+                "points": achievement.points,
                 "is_unlocked": is_unlocked,
-                "unlocked_at": next((
-                    ua.unlocked_at for ua in user_achievements 
-                    if ua.achievement_id == achievement.id
-                ), None),
+                "unlocked_at": unlocked_at,
                 "progress": progress,
                 "current_value": current_value,
                 "requirement_value": requirement_value

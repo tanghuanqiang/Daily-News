@@ -541,7 +541,14 @@ class UserAchievementResponse(BaseModel):
 
 
 class AchievementWithProgress(BaseModel):
-    achievement: AchievementDefinitionResponse
+    # 扁平化结构，直接包含成就定义的所有字段
+    id: int
+    code: str
+    name: str
+    description: str
+    icon: Optional[str]
+    category: Optional[str]
+    points: int
     is_unlocked: bool
     unlocked_at: Optional[dt] = None
     progress: float  # 0.0 - 1.0
