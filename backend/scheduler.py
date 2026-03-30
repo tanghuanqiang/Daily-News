@@ -481,7 +481,7 @@ def should_send_email_to_user(user: User, current_time: datetime) -> bool:
     
     发送条件：
     - 用户启用了邮件通知
-    - 当前时间匹配目标推送时间（小时和分钟）
+    - 在目标推送时间的小时范围内（例如9:00-9:59）
     - 今天还没发送过邮件
     """
     if not user.email_notifications:
@@ -497,42 +497,39 @@ def should_send_email_to_user(user: User, current_time: datetime) -> bool:
     # 获取用户的推送时间（个性化或默认）
     target_hour, target_minute = get_user_push_time(user)
     
-    # 检查当前时间是否匹配目标时间（精确到分钟）
-    if current_time.hour != target_hour:
-        logger.debug(f"跳过用户 {user.id}: 当前时间 {current_time.hour:02d}:{current_time.minute:02d} 不匹配目标小时 {target_hour:02d}")
-        return False
-    
-    # 分钟检查：在当前时间的第一个10分钟窗口内发送
-    # 例如：目标时间是 10:00，则在 10:00-10:09 之间发送
-    if current_time.minute // 10 != target_minute // 10:
-        logger.debug(f"跳过用户 {user.id}: 当前分钟 {current_time.minute:02d} 不在目标分钟 {target_minute:02d} 的10分钟窗口内")
-        return False
-    
-    # 检查今天是否已发送
+    # 检查今天是否已发送（这个检查优先，避免无效的时间检查）
     last_sent = user.last_email_sent_at
     current_date = current_time.date()
     
+    if last_sent:
+        # 将 last_sent 转换为配置时区进行比较
+        tz = pytz.timezone(settings.TIMEZONE)
+        if last_sent.tzinfo is None:
+            # 如果 last_sent 是 naive datetime，假设它是 UTC
+            last_sent_tz = pytz.UTC.localize(last_sent)
+        else:
+            last_sent_tz = last_sent
+        
+        # 转换为配置时区
+        last_sent_in_tz = last_sent_tz.astimezone(tz)
+        
+        if last_sent_in_tz.date() >= current_date:
+            logger.debug(f"跳过用户 {user.id}: 今天已发送过邮件 (上次发送: {last_sent_in_tz})")
+            return False
+    
+    # 时间检查：放宽到整个目标小时窗口（例如用户设置9点，则9:00-9:59都可以发送）
+    # 这样可以确保在每10分钟检查一次的情况下，不会漏掉发送
+    if current_time.hour != target_hour:
+        logger.debug(f"跳过用户 {user.id}: 当前时间 {current_time.hour:02d}:{current_time.minute:02d} 不在目标小时 {target_hour:02d} 范围内")
+        return False
+    
+    # 首次发送或今天未发送，满足时间条件则发送
     if not last_sent:
         logger.info(f"准备发送邮件给用户 {user.id} {user.email}: 今天尚未发送")
-        return True
-    
-    # 将 last_sent 转换为配置时区进行比较
-    tz = pytz.timezone(settings.TIMEZONE)
-    if last_sent.tzinfo is None:
-        # 如果 last_sent 是 naive datetime，假设它是 UTC
-        last_sent_tz = pytz.UTC.localize(last_sent)
     else:
-        last_sent_tz = last_sent
+        logger.info(f"准备发送邮件给用户 {user.id} {user.email}: 今天尚未发送（在目标时间窗口内）")
     
-    # 转换为配置时区
-    last_sent_in_tz = last_sent_tz.astimezone(tz)
-    
-    if last_sent_in_tz.date() < current_date:
-        logger.info(f"准备发送邮件给用户 {user.id} {user.email}: 上次发送日期 {last_sent_in_tz.date()} 早于今天 {current_date}")
-        return True
-    else:
-        logger.debug(f"跳过用户 {user.id}: 今天已发送过邮件")
-        return False
+    return True
 
 
 def send_email_to_user(user_id: int, db: Session):
@@ -823,12 +820,12 @@ def start_scheduler():
             replace_existing=True
         )
         
-        # Check user email schedules every hour
+        # Check user email schedules every 10 minutes
         # This allows each user to have their own schedule
         scheduler.add_job(
             send_scheduled_emails,
             IntervalTrigger(
-                hours=1,  # Check every hour
+                minutes=10,  # Check every 10 minutes for better delivery window
                 timezone=settings.TIMEZONE
             ),
             id='check_user_email_schedules',
@@ -838,7 +835,7 @@ def start_scheduler():
         scheduler.start()
         logger.info(
             f"Scheduler started (optimized) - News update at {settings.DAILY_UPDATE_HOUR}:{settings.DAILY_UPDATE_MINUTE:02d}, "
-            f"Email check every hour ({settings.TIMEZONE})"
+            f"Email check every 10 minutes ({settings.TIMEZONE})"
         )
         
     except Exception as e:

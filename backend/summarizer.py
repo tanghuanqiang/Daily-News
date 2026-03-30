@@ -188,58 +188,82 @@ class NewsSummarizer:
         Note on GLM4.7 thinking mode: GLM4.7 is a reasoning-enhanced model that outputs
         both `reasoning_content` (CoT process) and `content` (final answer). We disable
         thinking mode via extra_body to get direct answers and reduce token usage.
+        
+        Includes retry logic for rate limit errors (429 status).
         """
         if not settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY == "":
             logger.warning("NVIDIA API key not configured, using fallback summary")
             return self._fallback_summary(title, content, roast_mode)
         
-        try:
-            client = get_nvidia_client()
-            if not client:
-                logger.error("NVIDIA client not available")
-                return self._fallback_summary(title, content, roast_mode)
-            
-            # 使用统一的 chat prompt 构建方法（few-shot + 分离 system/user）
-            system_prompt, user_prompt = self._build_chat_prompt(title, content, roast_mode, topic)
-            
-            # 调用NVIDIA API，禁用 GLM4.7 的 thinking 模式
-            # thinking 模式下 reasoning_content 是 CoT 推理过程，不应作为摘要使用
-            # 禁用后 message.content 直接是最终答案，稳定且省 token
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.85 if roast_mode else 0.3,
-                max_tokens=200,
-                stream=False,
-                extra_body={"chat_template_kwargs": {"thinking": False}}
-            )
-            
-            # 提取摘要 — 只使用 message.content，不使用 reasoning_content
-            if response.choices and len(response.choices) > 0:
-                message = response.choices[0].message
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                client = get_nvidia_client()
+                if not client:
+                    logger.error("NVIDIA client not available")
+                    return self._fallback_summary(title, content, roast_mode)
                 
-                if message and message.content:
-                    summary = message.content.strip()
-                    logger.info(f"Generated summary (NVIDIA GLM) for: {title[:50]}...")
-                    return summary
+                # 使用统一的 chat prompt 构建方法（few-shot + 分离 system/user）
+                system_prompt, user_prompt = self._build_chat_prompt(title, content, roast_mode, topic)
                 
-                # content 为空：记录 finish_reason 帮助诊断，直接走 fallback
-                finish_reason = getattr(response.choices[0], 'finish_reason', 'unknown')
-                logger.warning(
-                    f"NVIDIA API returned empty content for: {title[:50]}. "
-                    f"Finish reason: {finish_reason}. Using fallback."
+                # 调用NVIDIA API，禁用 GLM4.7 的 thinking 模式
+                # thinking 模式下 reasoning_content 是 CoT 推理过程，不应作为摘要使用
+                # 禁用后 message.content 直接是最终答案，稳定且省 token
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.85 if roast_mode else 0.3,
+                    max_tokens=200,
+                    stream=False,
+                    extra_body={"chat_template_kwargs": {"thinking": False}}
                 )
-                return self._fallback_summary(title, content, roast_mode)
-            else:
-                logger.error("NVIDIA API returned empty choices")
-                return self._fallback_summary(title, content, roast_mode)
                 
-        except Exception as e:
-            logger.error(f"NVIDIA GLM API error: {str(e)}", exc_info=True)
-            return self._fallback_summary(title, content, roast_mode)
+                # 提取摘要 — 只使用 message.content，不使用 reasoning_content
+                if response.choices and len(response.choices) > 0:
+                    message = response.choices[0].message
+                    
+                    if message and message.content:
+                        summary = message.content.strip()
+                        logger.info(f"Generated summary (NVIDIA GLM) for: {title[:50]}...")
+                        return summary
+                    
+                    # content 为空：记录 finish_reason 帮助诊断，直接走 fallback
+                    finish_reason = getattr(response.choices[0], 'finish_reason', 'unknown')
+                    logger.warning(
+                        f"NVIDIA API returned empty content for: {title[:50]}. "
+                        f"Finish reason: {finish_reason}. Using fallback."
+                    )
+                    return self._fallback_summary(title, content, roast_mode)
+                else:
+                    logger.error("NVIDIA API returned empty choices")
+                    return self._fallback_summary(title, content, roast_mode)
+                    
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Check for rate limit error (429)
+                if "rate_limit" in error_msg or "429" in error_msg or "too many requests" in error_msg:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"NVIDIA API rate limit hit, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                        import time
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"NVIDIA API rate limit exceeded after {max_retries} retries: {str(e)}")
+                        return self._fallback_summary(title, content, roast_mode)
+                
+                # Other errors - log and use fallback
+                logger.error(f"NVIDIA GLM API error: {str(e)}", exc_info=True)
+                return self._fallback_summary(title, content, roast_mode)
+        
+        # Should not reach here, but fallback just in case
+        return self._fallback_summary(title, content, roast_mode)
     
     def _generate_dashscope(self, title: str, content: str, roast_mode: bool, topic: Optional[str] = None) -> str:
         """Generate summary using DashScope (Alibaba Cloud) - uses chat messages format"""
