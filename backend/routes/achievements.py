@@ -69,8 +69,8 @@ async def get_my_achievements_with_progress(
         成就列表（包含解锁状态和进度）
     """
     try:
-        # 导入必要的模型
-        from models import NewsFeedback, UserShare, UserSubscription
+        # 导入必要的模型（分享通过NewsFeedback表记录，feedback_type='share'）
+        from models import NewsFeedback, UserSubscription
         
         # 获取所有成就定义
         all_achievements = db.query(AchievementDefinition).filter(
@@ -94,9 +94,10 @@ async def get_my_achievements_with_progress(
             NewsFeedback.feedback_type == 'like'
         ).count()
         
-        # 分享成就：统计用户分享次数
-        share_count = db.query(UserShare).filter(
-            UserShare.user_id == current_user.id
+        # 分享成就：统计用户分享次数（通过NewsFeedback表，feedback_type='share'）
+        share_count = db.query(NewsFeedback).filter(
+            NewsFeedback.user_id == current_user.id,
+            NewsFeedback.feedback_type == 'share'
         ).count()
         
         # 订阅成就：统计用户订阅的主题数量
