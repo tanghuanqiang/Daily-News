@@ -69,6 +69,9 @@ async def get_my_achievements_with_progress(
         成就列表（包含解锁状态和进度）
     """
     try:
+        # 导入必要的模型
+        from models import NewsFeedback, UserShare, UserSubscription
+        
         # 获取所有成就定义
         all_achievements = db.query(AchievementDefinition).filter(
             AchievementDefinition.is_active == True
@@ -84,6 +87,25 @@ async def get_my_achievements_with_progress(
             ua.achievement_id for ua in user_achievements
         }
         
+        # 预先计算各类别成就的当前进度
+        # 阅读成就：统计用户点赞（喜欢）的新闻数量
+        read_count = db.query(NewsFeedback).filter(
+            NewsFeedback.user_id == current_user.id,
+            NewsFeedback.feedback_type == 'like'
+        ).count()
+        
+        # 分享成就：统计用户分享次数
+        share_count = db.query(UserShare).filter(
+            UserShare.user_id == current_user.id
+        ).count()
+        
+        # 订阅成就：统计用户订阅的主题数量
+        subscription_count = db.query(UserSubscription).filter(
+            UserSubscription.user_id == current_user.id
+        ).count()
+        
+        logger.info(f"用户 {current_user.id} 的统计数据: 阅读={read_count}, 分享={share_count}, 订阅={subscription_count}")
+        
         # 构建响应 - 扁平化结构
         result = []
         for achievement in all_achievements:
@@ -95,10 +117,48 @@ async def get_my_achievements_with_progress(
                 if ua.achievement_id == achievement.id
             ), None)
             
-            # 计算进度（简化版本，实际项目中需要根据具体逻辑计算）
-            progress = 1.0 if is_unlocked else 0.0
-            current_value = 1 if is_unlocked else 0
-            requirement_value = 1
+            # 根据成就类别和 requirement_config 计算真实进度
+            req_config = achievement.requirement_config or {}
+            category = achievement.category
+            
+            if is_unlocked:
+                # 已解锁的成就
+                progress = 1.0
+                if category == 'reading':
+                    current_value = req_config.get('count', 1)
+                elif category == 'sharing':
+                    current_value = req_config.get('count', 1)
+                elif category == 'exploration':
+                    current_value = req_config.get('count', 1)
+                else:
+                    current_value = 1
+                requirement_value = req_config.get('count', 1)
+            else:
+                # 未解锁的成就：根据类别计算当前进度
+                if category == 'reading':
+                    # 阅读成就：需要阅读 count 篇新闻
+                    requirement_value = req_config.get('count', 10)
+                    current_value = min(read_count, requirement_value)
+                    progress = current_value / requirement_value if requirement_value > 0 else 0
+                elif category == 'sharing':
+                    # 分享成就：需要分享 count 次
+                    requirement_value = req_config.get('count', 1)
+                    current_value = min(share_count, requirement_value)
+                    progress = current_value / requirement_value if requirement_value > 0 else 0
+                elif category == 'exploration':
+                    # 探索成就：需要订阅 count 个主题
+                    requirement_value = req_config.get('count', 1)
+                    current_value = min(subscription_count, requirement_value)
+                    progress = current_value / requirement_value if requirement_value > 0 else 0
+                elif category == 'early_bird':
+                    # 早起成就：暂时简化处理
+                    requirement_value = req_config.get('days', 1)
+                    current_value = 0
+                    progress = 0
+                else:
+                    requirement_value = 1
+                    current_value = 0
+                    progress = 0
             
             # 扁平化返回，与前端期望一致
             result.append({
