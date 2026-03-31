@@ -88,10 +88,11 @@ async def get_my_achievements_with_progress(
         }
         
         # 预先计算各类别成就的当前进度
-        # 阅读成就：统计用户点赞（喜欢）的新闻数量
-        read_count = db.query(NewsFeedback).filter(
-            NewsFeedback.user_id == current_user.id,
-            NewsFeedback.feedback_type == 'like'
+        # 阅读成就：统计用户已读的新闻数量（通过UserNewsInteraction表）
+        from models import UserNewsInteraction
+        read_count = db.query(UserNewsInteraction).filter(
+            UserNewsInteraction.user_id == current_user.id,
+            UserNewsInteraction.is_read == True
         ).count()
         
         # 分享成就：统计用户分享次数（通过NewsFeedback表，feedback_type='share'）
@@ -102,7 +103,8 @@ async def get_my_achievements_with_progress(
         
         # 订阅成就：统计用户订阅的主题数量
         subscription_count = db.query(UserSubscription).filter(
-            UserSubscription.user_id == current_user.id
+            UserSubscription.user_id == current_user.id,
+            UserSubscription.is_active == True
         ).count()
         
         logger.info(f"用户 {current_user.id} 的统计数据: 阅读={read_count}, 分享={share_count}, 订阅={subscription_count}")

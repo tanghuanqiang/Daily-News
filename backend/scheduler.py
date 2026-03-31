@@ -517,10 +517,20 @@ def should_send_email_to_user(user: User, current_time: datetime) -> bool:
             logger.debug(f"跳过用户 {user.id}: 今天已发送过邮件 (上次发送: {last_sent_in_tz})")
             return False
     
-    # 时间检查：放宽到整个目标小时窗口（例如用户设置9点，则9:00-9:59都可以发送）
+    # 时间检查：放宽到目标时间前后30分钟的窗口
     # 这样可以确保在每10分钟检查一次的情况下，不会漏掉发送
-    if current_time.hour != target_hour:
-        logger.debug(f"跳过用户 {user.id}: 当前时间 {current_time.hour:02d}:{current_time.minute:02d} 不在目标小时 {target_hour:02d} 范围内")
+    # 例如用户设置9:00，则在8:30-9:30之间都可以发送
+    current_minutes = current_time.hour * 60 + current_time.minute
+    target_minutes = target_hour * 60 + target_minute
+    time_diff = abs(current_minutes - target_minutes)
+    
+    # 如果跨越了午夜，需要特殊处理
+    if time_diff > 12 * 60:  # 如果差值超过12小时，说明跨越了午夜
+        time_diff = 24 * 60 - time_diff
+    
+    # 允许30分钟的窗口期
+    if time_diff > 30:
+        logger.debug(f"跳过用户 {user.id}: 当前时间 {current_time.hour:02d}:{current_time.minute:02d} 不在目标时间 {target_hour:02d}:{target_minute:02d} 的30分钟窗口内（差值{time_diff}分钟）")
         return False
     
     # 首次发送或今天未发送，满足时间条件则发送
