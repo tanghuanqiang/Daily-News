@@ -70,7 +70,7 @@ async def get_my_achievements_with_progress(
     """
     try:
         # 导入必要的模型（分享通过NewsFeedback表记录，feedback_type='share'）
-        from models import NewsFeedback, UserSubscription
+        from models import NewsFeedback, Subscription
         
         # 获取所有成就定义
         all_achievements = db.query(AchievementDefinition).filter(
@@ -102,9 +102,9 @@ async def get_my_achievements_with_progress(
         ).count()
         
         # 订阅成就：统计用户订阅的主题数量
-        subscription_count = db.query(UserSubscription).filter(
-            UserSubscription.user_id == current_user.id,
-            UserSubscription.is_active == True
+        subscription_count = db.query(Subscription).filter(
+            Subscription.user_id == current_user.id,
+            Subscription.is_active == True
         ).count()
         
         logger.info(f"用户 {current_user.id} 的统计数据: 阅读={read_count}, 分享={share_count}, 订阅={subscription_count}")
