@@ -69,7 +69,7 @@ class NewsCache(Base):
     id = Column(Integer, primary_key=True, index=True)
     topic = Column(String, index=True, nullable=False)
     title = Column(String, nullable=False)
-    summary = Column(Text, nullable=False)  # LLM generated summary
+    summary = Column(Text, nullable=False)  # LLM generated summary (fallback or AI)
     summary_roast = Column(Text, nullable=True)  # 吐槽模式摘要
     url = Column(String, nullable=False)
     source = Column(String, nullable=True)  # News source name
@@ -84,6 +84,32 @@ class NewsCache(Base):
     
     # Metadata
     raw_content = Column(Text, nullable=True)  # Original news content snippet
+    
+    # AI summary status: pending → partial → completed / unavailable
+    summary_status = Column(String(20), nullable=False, default="pending", index=True)
+
+
+class SummaryTask(Base):
+    """AI摘要异步任务队列表 — 解耦新闻抓取与LLM调用"""
+    __tablename__ = "summary_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    news_id = Column(Integer, ForeignKey("news_cache.id"), nullable=False, index=True)
+    task_type = Column(String(20), nullable=False, index=True)  # 'summary' | 'summary_roast' | 'relevance'
+    status = Column(String(20), nullable=False, default="pending", index=True)  # pending | processing | completed | failed
+    priority = Column(Integer, nullable=False, default=0)  # 越小越优先: 0=summary, 1=summary_roast, 2=relevance
+    retry_count = Column(Integer, nullable=False, default=0)
+    max_retries = Column(Integer, nullable=False, default=3)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # 幂等：同一新闻 + 同一任务类型只入队一次
+    __table_args__ = (
+        UniqueConstraint("news_id", "task_type", name="uq_news_task_type"),
+        Index("idx_task_status_priority", "status", "priority"),
+    )
 
 
 class SystemLog(Base):
@@ -433,6 +459,8 @@ class NewsItem(BaseModel):
     published_at: Optional[dt]
     fetched_at: dt
     date: str
+    summary_status: Optional[str] = "completed"
+    is_read: Optional[bool] = False
     
     class Config:
         from_attributes = True

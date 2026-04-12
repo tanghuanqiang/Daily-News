@@ -501,3 +501,102 @@ def export_users(
     except Exception as e:
         logger.error(f"导出用户数据失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"导出用户数据失败: {str(e)}")
+
+
+# ==================== AI摘要任务队列管理 ====================
+
+@router.get("/summary-tasks/stats", response_model=Dict[str, Any])
+def get_summary_task_stats(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """获取AI摘要任务队列统计"""
+    try:
+        from services.summary_worker import get_worker
+        return get_worker().get_stats()
+    except Exception as e:
+        logger.error(f"获取摘要任务统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}")
+
+
+@router.post("/summary-tasks/requeue")
+def requeue_failed_tasks(
+    news_id: int = None,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """重新入队失败的任务"""
+    try:
+        from services.summary_queue import SummaryTaskQueue
+        queue = SummaryTaskQueue(db)
+        count = queue.requeue_failed(news_id=news_id)
+        return {"success": True, "requeued": count}
+    except Exception as e:
+        logger.error(f"重新入队失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"重新入队失败: {str(e)}")
+
+
+@router.get("/summary-tasks/list", response_model=List[Dict[str, Any]])
+def get_summary_tasks_list(
+    status: str = None,
+    task_type: str = None,
+    limit: int = 50,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """获取摘要任务列表"""
+    try:
+        from models import SummaryTask
+        query = db.query(SummaryTask)
+
+        if status:
+            query = query.filter(SummaryTask.status == status)
+        if task_type:
+            query = query.filter(SummaryTask.task_type == task_type)
+
+        tasks = query.order_by(SummaryTask.created_at.desc()).limit(limit).all()
+
+        return [
+            {
+                "id": t.id,
+                "news_id": t.news_id,
+                "task_type": t.task_type,
+                "status": t.status,
+                "priority": t.priority,
+                "retry_count": t.retry_count,
+                "max_retries": t.max_retries,
+                "error_message": t.error_message,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            }
+            for t in tasks
+        ]
+    except Exception as e:
+        logger.error(f"获取摘要任务列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
+
+
+@router.get("/news/summary-status", response_model=Dict[str, Any])
+def get_news_summary_status(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """获取新闻AI摘要完成状态统计"""
+    try:
+        from sqlalchemy import func
+        status_counts = db.query(
+            NewsCache.summary_status, func.count(NewsCache.id)
+        ).group_by(NewsCache.summary_status).all()
+
+        result = {}
+        total = 0
+        for status, count in status_counts:
+            result[status] = count
+            total += count
+        result["total"] = total
+
+        return result
+    except Exception as e:
+        logger.error(f"获取摘要状态统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}")

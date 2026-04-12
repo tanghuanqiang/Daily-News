@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, settings
 from models import User, Subscription, NewsCache, SystemLog, TopicRefreshStatus, CustomRSSFeed
 from news_fetcher import NewsFetcher, deduplicate_articles
-from summarizer import get_summarizer
 import logging
 import smtplib
 from email.mime.text import MIMEText
@@ -30,6 +29,8 @@ def get_current_date_in_timezone() -> str:
 def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str = None) -> dict:
     """Update news for a specific topic (optimized: one topic refresh instead of per-user)
     
+    解耦设计: 只抓取新闻并存库，AI 摘要通过异步任务队列处理。
+    
     Args:
         topic: Topic name
         date_str: Date string (YYYY-MM-DD)
@@ -37,7 +38,7 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
         lock_id: Lock ID for concurrent refresh protection
     
     Returns:
-        dict: {"success": bool, "articles_count": int, "error": str}
+        dict: {"success": bool, "articles_count": int, "tasks_enqueued": int, "error": str}
     """
     try:
         # Get all active custom RSS feeds for this topic (from all users)
@@ -57,7 +58,6 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
         ]
         
         fetcher = NewsFetcher(custom_rss_feeds=custom_rss_feeds)
-        summarizer = get_summarizer()
         
         logger.info(f"Fetching news for topic: {topic} (date: {date_str})")
         
@@ -66,7 +66,7 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
         
         if not articles:
             logger.warning(f"No articles found for topic: {topic}")
-            return {"success": True, "articles_count": 0, "error": None}
+            return {"success": True, "articles_count": 0, "tasks_enqueued": 0, "error": None}
         
         # Deduplicate
         articles = deduplicate_articles(articles)
@@ -74,92 +74,88 @@ def update_news_for_topic(topic: str, date_str: str, db: Session, lock_id: str =
         # Limit to 16 articles
         articles = articles[:16]
         
-        updated_count = 0
         created_count = 0
+        new_news_ids = []
         
-        # Process articles one by one and save immediately
+        # Process articles: save to DB first, enqueue AI tasks separately
         for article in articles:
             try:
-                # For RSS articles, check by entry_id first (before LLM processing)
+                # For RSS articles, check by entry_id first
                 entry_id = article.get("entry_id")
                 existing = None
                 
                 if entry_id:
-                    # Check if article already exists by entry_id (for RSS feeds)
                     existing = db.query(NewsCache).filter(
                         NewsCache.entry_id == entry_id
                     ).first()
                 else:
-                    # For non-RSS articles (GNews, NewsData), check by URL + date + topic
                     existing = db.query(NewsCache).filter(
                         NewsCache.url == article["url"],
                         NewsCache.date == date_str,
                         NewsCache.topic == topic
                     ).first()
                 
-                # If already exists, skip LLM processing
                 if existing:
-                    logger.debug(f"Article already exists, skipping LLM processing: {article.get('title', 'Unknown')[:50]}...")
+                    logger.debug(f"Article already exists, skipping: {article.get('title', 'Unknown')[:50]}...")
                     continue
                 
-                # Only process with LLM if article doesn't exist
-                # Normal summary
-                summary_normal = summarizer.generate_summary(
-                    article["title"],
-                    article["content"],
-                    roast_mode=False
-                )
+                # Generate fallback summary (截断) for immediate display
+                content = article.get("content", "") or ""
+                if content and len(content) > 100:
+                    fallback_summary = content[:100] + "..."
+                elif content:
+                    fallback_summary = content
+                else:
+                    fallback_summary = article.get("title", "暂无内容")
                 
-                # Roast mode summary
-                summary_roast = summarizer.generate_summary(
-                    article["title"],
-                    article["content"],
-                    roast_mode=True
-                )
-                
-                # Evaluate relevance score
-                relevance_score = summarizer.evaluate_relevance(
-                    topic,
-                    article["title"],
-                    article.get("content", "")
-                )
-                
-                # Create new cache entry
+                # Save article with fallback summary (no LLM call here)
                 news_cache = NewsCache(
                     topic=topic,
                     title=article["title"],
-                    summary=summary_normal,
-                    summary_roast=summary_roast,
+                    summary=fallback_summary,
+                    summary_roast=None,
                     url=article["url"],
                     source=article.get("source"),
                     image_url=article.get("image_url"),
                     published_at=article.get("published_at"),
                     date=date_str,
-                    relevance_score=relevance_score,
-                    raw_content=article.get("content", "")[:1000],  # Truncate
-                    entry_id=entry_id  # Store entry_id for RSS articles
+                    relevance_score=0.5,  # 默认分数，后续由 AI 评估
+                    raw_content=content[:1000],  # 保存原始内容供 AI 使用
+                    entry_id=entry_id,
+                    summary_status="pending"  # 标记为等待 AI 总结
                 )
                 db.add(news_cache)
-                created_count += 1
-                
-                # Commit after each article to save immediately
                 db.commit()
+                db.refresh(news_cache)
+                
+                new_news_ids.append(news_cache.id)
+                created_count += 1
                 logger.debug(f"Saved article '{article.get('title', 'Unknown')[:50]}...' for topic {topic}")
                     
             except Exception as e:
                 logger.error(f"Error processing article '{article.get('title', 'Unknown')}' for topic {topic}: {str(e)}")
-                db.rollback()  # Rollback on error
+                db.rollback()
                 continue
         
-        total_count = updated_count + created_count
-        logger.info(f"Updated {total_count} articles for topic: {topic} (created: {created_count}, updated: {updated_count})")
+        # Enqueue AI summary tasks for new articles (decoupled from fetch)
+        tasks_enqueued = 0
+        if new_news_ids:
+            try:
+                from services.summary_queue import SummaryTaskQueue
+                queue = SummaryTaskQueue(db)
+                tasks_enqueued = queue.enqueue_batch(new_news_ids)
+                logger.info(f"Enqueued {tasks_enqueued} AI summary tasks for {len(new_news_ids)} new articles (topic: {topic})")
+            except Exception as e:
+                logger.error(f"Failed to enqueue summary tasks: {e}")
         
-        return {"success": True, "articles_count": total_count, "error": None}
+        logger.info(f"Updated {created_count} articles for topic: {topic}, enqueued {tasks_enqueued} AI tasks")
+        
+        return {"success": True, "articles_count": created_count, "tasks_enqueued": tasks_enqueued, "error": None}
         
     except Exception as e:
         logger.error(f"Error updating news for topic {topic}: {str(e)}")
         db.rollback()
-        return {"success": False, "articles_count": 0, "error": str(e)}
+        return {"success": False, "articles_count": 0, "tasks_enqueued": 0, "error": str(e)}
 
 
 def get_or_create_refresh_status(topic: str, date_str: str, db: Session) -> TopicRefreshStatus:
@@ -842,10 +838,33 @@ def start_scheduler():
             replace_existing=True
         )
         
+        # AI summary task worker — process async summarization tasks
+        # Runs every 3 seconds, respects rate limiter (30 RPM)
+        from services.summary_worker import worker_cycle, cleanup_old_tasks
+        worker_interval = getattr(settings, 'SUMMARY_WORKER_INTERVAL', 3)
+        
+        scheduler.add_job(
+            worker_cycle,
+            IntervalTrigger(seconds=worker_interval),
+            id='summary_task_worker',
+            replace_existing=True,
+            max_instances=1  # 防止重叠执行
+        )
+        
+        # Clean up old completed/failed tasks (daily at 3 AM)
+        scheduler.add_job(
+            cleanup_old_tasks,
+            CronTrigger(hour=3, minute=0, timezone=settings.TIMEZONE),
+            id='cleanup_summary_tasks',
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info(
-            f"Scheduler started (optimized) - News update at {settings.DAILY_UPDATE_HOUR}:{settings.DAILY_UPDATE_MINUTE:02d}, "
-            f"Email check every 10 minutes ({settings.TIMEZONE})"
+            f"Scheduler started (optimized) - "
+            f"News update at {settings.DAILY_UPDATE_HOUR}:{settings.DAILY_UPDATE_MINUTE:02d}, "
+            f"Email check every 10 minutes, "
+            f"Summary worker every {worker_interval}s ({settings.TIMEZONE})"
         )
         
     except Exception as e:

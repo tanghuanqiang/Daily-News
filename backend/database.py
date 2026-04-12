@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     DAILY_UPDATE_MINUTE: int = 0
     TIMEZONE: str = "Asia/Shanghai"
     
+    # AI Summary Task Queue
+    SUMMARY_TASK_RPM: int = 30              # NVIDIA API max RPM (留10余量给其他请求)
+    SUMMARY_TASK_BURST: int = 30            # 突发容量
+    SUMMARY_WORKER_INTERVAL: int = 3        # Worker 轮询间隔(秒)
+    SUMMARY_MAX_RETRIES: int = 3            # 最大重试次数
+    SUMMARY_TASK_CLEANUP_DAYS: int = 7      # 任务清理天数
+    
     # Email schedule configuration
     EMAIL_SCHEDULE_TYPE: str = "daily"  # "daily", "weekly", "interval"
     EMAIL_SCHEDULE_HOUR: int = 9  # 邮件发送时间（小时）

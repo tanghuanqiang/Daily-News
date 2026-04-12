@@ -151,7 +151,8 @@ async def get_dashboard(
                     "published_at": item.published_at,
                     "fetched_at": item.fetched_at,
                     "date": item.date,
-                    "is_read": read_status_map.get(item.id, False)
+                    "is_read": read_status_map.get(item.id, False),
+                    "summary_status": getattr(item, "summary_status", "completed")
                 }
                 news_items_with_status.append(news_dict)
             

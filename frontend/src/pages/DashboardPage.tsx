@@ -5,7 +5,7 @@ import { newsAPI, preferencesAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspaper, Sparkles, Shield } from 'lucide-react';
+import { RefreshCw, Settings, LogOut, Moon, Sun, Loader2, ExternalLink, Newspaper, Sparkles, Shield, Bot } from 'lucide-react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { useToast } from '@/components/ui/use-toast';
@@ -25,6 +25,7 @@ interface NewsItem {
   published_at: string | null;
   date: string;
   is_read?: boolean;  // 用户是否已读
+  summary_status?: string;  // AI摘要状态: pending | partial | completed | unavailable
 }
 
 interface TopicNews {
@@ -68,11 +69,17 @@ export default function DashboardPage() {
       document.documentElement.classList.add('dark');
     }
 
+    // Auto-refresh dashboard every 15s to pick up AI summaries
+    const autoRefreshInterval = setInterval(() => {
+      loadDashboard();
+    }, 15000);
+
     // Cleanup polling on unmount
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
       }
+      clearInterval(autoRefreshInterval);
     };
   }, []);
 
@@ -460,7 +467,18 @@ export default function DashboardPage() {
                                   {item.title}
                                 </h4>
                                 <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 line-clamp-3">
-                                  {topic.roast_mode && item.summary_roast 
+                                  {item.summary_status === 'pending' ? (
+                                    <span className="flex items-center gap-1.5 text-blue-500 dark:text-blue-400">
+                                      <Bot className="h-3.5 w-3.5 animate-pulse" />
+                                      AI 摘要生成中...
+                                    </span>
+                                  ) : item.summary_status === 'unavailable' ? (
+                                    <span className="text-slate-400 dark:text-slate-500 italic">
+                                      {topic.roast_mode && item.summary_roast 
+                                        ? item.summary_roast 
+                                        : item.summary}
+                                    </span>
+                                  ) : topic.roast_mode && item.summary_roast 
                                     ? item.summary_roast 
                                     : item.summary}
                                 </p>
