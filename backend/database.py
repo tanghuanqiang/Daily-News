@@ -93,3 +93,29 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def migrate_database():
+    """Run simple migrations (add columns if missing) for SQLite compatibility.
+    Called at startup after Base.metadata.create_all().
+    """
+    import logging
+    _logger = logging.getLogger(__name__)
+    try:
+        from sqlalchemy import text
+        conn = engine.connect()
+        
+        # Check and add summary_status to news_cache if missing
+        try:
+            result = conn.execute(text("SELECT summary_status FROM news_cache LIMIT 0"))
+            result.close()
+            _logger.debug("Migration check: summary_status column already exists")
+        except Exception:
+            # Column doesn't exist, add it
+            conn.execute(text("ALTER TABLE news_cache ADD COLUMN summary_status VARCHAR(20) DEFAULT 'pending'"))
+            conn.commit()
+            _logger.info("Migration: Added summary_status column to news_cache")
+        
+        conn.close()
+    except Exception as e:
+        _logger.warning(f"Database migration skipped: {e}")
